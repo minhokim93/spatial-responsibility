@@ -1,0 +1,11 @@
+numpy
+pandas
+geopandas
+shapely
+rasterio
+networkx
+matplotlib
+seaborn
+tqdm
+ipython
+jupyter
