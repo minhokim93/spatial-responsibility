@@ -44,21 +44,32 @@
 <main>
   <section id="map-panel">
     <svg id="map" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet">
-      <!-- Bottom -> top paint order: base GIS, then region fills, then
-           buildings/nodes, then links ON TOP of nodes (arrowheads drawn as
-           small triangles at each arc's midpoint, not SVG markers, so they
-           can be positioned mid-curve), then the click highlight (always
-           topmost), then optional house-number labels. -->
-      <g id="layer-parcels"></g>
-      <g id="layer-ds"></g>
-      <g id="layer-regions"></g>
-      <g id="layer-buildings"></g>
-      <g id="layer-network-nodes"></g>
-      <g id="layer-sr-links"></g>
-      <g id="layer-or-links"></g>
-      <g id="layer-highlight-links"></g>
-      <g id="layer-labels"></g>
+      <!-- #viewport carries the pan/zoom transform; every rendering function
+           still draws into the fixed 0-1000 coordinate space untouched, so
+           zoom/pan needed no changes anywhere else. -->
+      <g id="viewport">
+        <!-- Bottom -> top paint order: base GIS, then region fills, then
+             buildings/nodes, then links ON TOP of nodes (arrowheads drawn as
+             small triangles at each arc's midpoint, not SVG markers, so they
+             can be positioned mid-curve), then the click highlight (always
+             topmost), then optional house-number labels. -->
+        <g id="layer-parcels"></g>
+        <g id="layer-ds"></g>
+        <g id="layer-regions"></g>
+        <g id="layer-buildings"></g>
+        <g id="layer-network-nodes"></g>
+        <g id="layer-sr-links"></g>
+        <g id="layer-or-links"></g>
+        <g id="layer-highlight-links"></g>
+        <g id="layer-labels"></g>
+      </g>
     </svg>
+
+    <div id="zoom-controls">
+      <button id="zoom-in" aria-label="Zoom in">+</button>
+      <button id="zoom-out" aria-label="Zoom out">&minus;</button>
+      <button id="zoom-reset" aria-label="Reset view">&#8862;</button>
+    </div>
 
     <div id="selection-popup" class="hidden">
       <button id="clear-selection" class="popup-close" aria-label="Close">&times;</button>

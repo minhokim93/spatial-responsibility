@@ -96,7 +96,38 @@ main {
   width: 100%;
   height: 100%;
   display: block;
+  touch-action: none; /* we handle pan/pinch-zoom ourselves */
+  cursor: grab;
 }
+#map.panning { cursor: grabbing; }
+
+#zoom-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  z-index: 15;
+}
+#zoom-controls button {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: none;
+  border-bottom: 1px solid var(--border);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  color: #333;
+}
+#zoom-controls button:last-child { border-bottom: none; }
+#zoom-controls button:hover { background: #f0f0ee; }
+#zoom-reset { font-size: 14px !important; }
 
 .parcel-shape {
   fill: #eaeaea;
@@ -421,21 +452,40 @@ main {
   }
 
   #selection-popup {
-    left: 8px;
-    top: 8px;
-    right: 8px;
-    max-width: none;
-    padding: 10px 12px;
-    font-size: 12px;
+    left: 6px;
+    top: 6px;
+    right: auto;
+    min-width: 0;
+    width: 45vw;
+    max-width: 190px;
+    max-height: 46vh;
+    overflow-y: auto;
+    padding: 8px 9px 6px;
+    font-size: 10.5px;
   }
+  #selection-popup .sel-id { font-size: 12px; margin-bottom: 5px; }
+  #selection-popup .stat-table { font-size: 10px; margin-bottom: 6px; }
+  #selection-popup .stat-table th, #selection-popup .stat-table td { padding: 2px 3px; }
+  #selection-popup .conn-summary { font-size: 10px; gap: 2px; margin-bottom: 6px; }
+  #selection-popup .clear-btn { padding: 4px 8px; font-size: 10.5px; }
+  #selection-popup .popup-close { font-size: 15px; top: 3px; right: 4px; }
 
   #legend {
-    left: 8px;
-    bottom: 8px;
-    max-width: 45vw;
-    padding: 8px 10px;
-    font-size: 11px;
+    left: 6px;
+    bottom: 6px;
+    width: 34vw;
+    max-width: 130px;
+    max-height: 30vh;
+    overflow-y: auto;
+    padding: 6px 8px;
+    font-size: 9.5px;
   }
+  #legend .legend-block + .legend-block { margin-top: 5px; padding-top: 5px; }
+  #legend .legend-title { margin-bottom: 3px; line-height: 1.25; }
+  #legend .legend-bar { height: 7px; margin: 2px 0; }
+
+  #zoom-controls { right: 8px; bottom: 6px; }
+  #zoom-controls button { width: 28px; height: 28px; font-size: 15px; }
 
   .modal-card {
     max-width: 92vw;

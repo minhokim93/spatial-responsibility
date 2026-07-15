@@ -624,6 +624,135 @@
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
   }
 
+  // ------------------------------------------------------------------
+  // Zoom / pan. A single transform on #viewport (translate then scale) --
+  // every rendering function above still draws into the fixed 0..1000
+  // coordinate space, so none of that code needed to change.
+  // ------------------------------------------------------------------
+  const viewportEl = document.getElementById('viewport');
+  const zoom = { scale: 1, tx: 0, ty: 0 };
+  const ZOOM_MIN = 0.5;
+  const ZOOM_MAX = 10;
+
+  function applyZoomTransform() {
+    viewportEl.setAttribute('transform', `translate(${zoom.tx.toFixed(2)},${zoom.ty.toFixed(2)}) scale(${zoom.scale.toFixed(4)})`);
+  }
+
+  // Client (mouse/touch) coords -> fixed 0..1000 viewBox coords, independent
+  // of the current zoom/pan (i.e. "where in the untransformed map is this").
+  function clientToViewBox(clientX, clientY) {
+    const rect = svg.getBoundingClientRect();
+    const vbX = ((clientX - rect.left) / rect.width) * VIEW;
+    const vbY = ((clientY - rect.top) / rect.height) * VIEW;
+    return [vbX, vbY];
+  }
+
+  // Zoom by `factor` while keeping the point under (vbX, vbY) fixed on
+  // screen -- the standard "zoom toward cursor/pinch center" behavior.
+  function zoomAt(vbX, vbY, factor) {
+    const newScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoom.scale * factor));
+    const actualFactor = newScale / zoom.scale;
+    zoom.tx = vbX - (vbX - zoom.tx) * actualFactor;
+    zoom.ty = vbY - (vbY - zoom.ty) * actualFactor;
+    zoom.scale = newScale;
+    applyZoomTransform();
+  }
+
+  function resetZoom() {
+    zoom.scale = 1; zoom.tx = 0; zoom.ty = 0;
+    applyZoomTransform();
+  }
+
+  function initZoomPan() {
+    svg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const [vbX, vbY] = clientToViewBox(e.clientX, e.clientY);
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      zoomAt(vbX, vbY, factor);
+    }, { passive: false });
+
+    // Mouse drag to pan. Attached to the SVG itself; individual building/
+    // node click handlers are unaffected since a plain click (no movement
+    // between mousedown/mouseup) still fires the browser's native click
+    // event on that element regardless of these listeners.
+    let dragging = false;
+    let lastX = 0, lastY = 0;
+
+    svg.addEventListener('mousedown', (e) => {
+      dragging = true;
+      lastX = e.clientX; lastY = e.clientY;
+      svg.classList.add('panning');
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const rect = svg.getBoundingClientRect();
+      zoom.tx += (e.clientX - lastX) * (VIEW / rect.width);
+      zoom.ty += (e.clientY - lastY) * (VIEW / rect.height);
+      lastX = e.clientX; lastY = e.clientY;
+      applyZoomTransform();
+    });
+    window.addEventListener('mouseup', () => {
+      dragging = false;
+      svg.classList.remove('panning');
+    });
+
+    // Touch: one finger pans, two fingers pinch-zoom.
+    let touchMode = null; // 'pan' | 'pinch'
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+    let panLastX = 0, panLastY = 0;
+
+    function touchDist(t0, t1) {
+      return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    }
+    function touchMid(t0, t1) {
+      return [(t0.clientX + t1.clientX) / 2, (t0.clientY + t1.clientY) / 2];
+    }
+
+    svg.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        touchMode = 'pan';
+        panLastX = e.touches[0].clientX;
+        panLastY = e.touches[0].clientY;
+      } else if (e.touches.length === 2) {
+        touchMode = 'pinch';
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+        pinchStartScale = zoom.scale;
+      }
+    }, { passive: true });
+
+    svg.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (touchMode === 'pan' && e.touches.length === 1) {
+        const rect = svg.getBoundingClientRect();
+        const t = e.touches[0];
+        zoom.tx += (t.clientX - panLastX) * (VIEW / rect.width);
+        zoom.ty += (t.clientY - panLastY) * (VIEW / rect.height);
+        panLastX = t.clientX; panLastY = t.clientY;
+        applyZoomTransform();
+      } else if (touchMode === 'pinch' && e.touches.length === 2) {
+        const dist = touchDist(e.touches[0], e.touches[1]);
+        const [midX, midY] = touchMid(e.touches[0], e.touches[1]);
+        const [vbX, vbY] = clientToViewBox(midX, midY);
+        const targetScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pinchStartScale * (dist / pinchStartDist)));
+        zoomAt(vbX, vbY, targetScale / zoom.scale);
+      }
+    }, { passive: false });
+
+    svg.addEventListener('touchend', (e) => {
+      if (e.touches.length === 0) touchMode = null;
+      else if (e.touches.length === 1) {
+        touchMode = 'pan';
+        panLastX = e.touches[0].clientX;
+        panLastY = e.touches[0].clientY;
+      }
+    });
+
+    document.getElementById('zoom-in').addEventListener('click', () => zoomAt(VIEW / 2, VIEW / 2, 1.3));
+    document.getElementById('zoom-out').addEventListener('click', () => zoomAt(VIEW / 2, VIEW / 2, 1 / 1.3));
+    document.getElementById('zoom-reset').addEventListener('click', resetZoom);
+  }
+
   function init() {
     renderParcels();
     renderDS();
@@ -639,6 +768,7 @@
     initNetworkPills();
     initSimControls();
     initAboutModal();
+    initZoomPan();
     setViewMode('map');
     setActiveNetwork('SR');
     renderSelection();
