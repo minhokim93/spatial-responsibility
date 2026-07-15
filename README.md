@@ -15,24 +15,23 @@ Explore the spatial responsibility maps and networks through this interactive vi
 
 As wildfire risk escalates in the wildland urban interface/intermix (WUI), creating defensible space clear of flammable fuels is important for wildfire risk mitigation and management. By definition, defensible space is constrained to the property parcel's boundaries and wildfire risk assessments generally focus on individual parcels, but this overlooks any risk in neighboring properties. If we imagine defensible spaces as buffers that cross property boundaries and overlap, neighboring properties may share wildfire risk in the overlapping spaces. However, homeowners may not recognize these overlapping regions and spillover effects of mitigating risk, jeopardizing their properties and, ultimately, the entire neighborhood. To address this issue, we propose a novel paradigm to rethink defensible space management by mapping the homeowner's responsibility to mitigate wildfire risk in overlapping defensible space buffers with respect to their neighbors who may share or owe responsibility to mitigation. First, we develop three new spatial metrics (Personal Responsibility (PR), Shared Responsibility (SR), and Owed Responsibility (OR)) for each homeowner, computed as the product of wildfire risk and the corresponding area of responsibility. Here, we use a fire behavior model to generate rate of spread (ROS) as a measure of wildfire hazard and compute each responsibility metric. Second, we build the metrics into spatial responsibility networks, modeled using all the houses in a given neighborhood with nodes characterized by average PR and with links weighted by average SR (or OR) that are directed to designate who is responsible between neighboring properties. In our study site, we find that SR networks are composed of multiple sub-networks while OR networks emerge as high-responsibility clusters. This information is important to inform homeowners about their individual responsibilities, identify properties with greater responsibility, and gather neighbors with interconnected responsibility. Subsequently, we simulate different mitigation strategies by iteratively removing network links and monitoring how the total responsibility may change in the neighborhood. We use three strategies (random, localized, and targeted) for link removal. Results demonstrate that the targeted strategy (removing links in descending order of highest responsibility) reduces the total responsibility most rapidly and fragments the network into smaller components, concentrating mitigation on the highest-responsibility links. Through this study, we provide a framework for wildfire risk management, which can be used with different metrics and for various neighborhood layouts. Ultimately, the spatial responsibility metrics and networks provide a scalable and spatially-explicit approach to map complex wildfire risk in the WUI, which can help inform defensible space inspections, guide efficient resource allocation, improve neighborhood-level planning, and empower individual homeowners to make more risk-informed decisions.
 
-
-## 📊 Results
-
-All figures below are generated from the demonstration study site (`data/`) in `notebooks/main.ipynb`, and use the same conventions throughout: node color encodes Personal Responsibility (PR), and edge color/direction encodes Shared (SR) or Owed (OR) Responsibility, with the arrow pointing toward whoever owes.
-
 **Responsibility concept.** Personal, Shared, and Owed Responsibility as regions of overlapping defensible space between neighboring parcels ($t_1$, $t_2$, ...) and homes ($h_1$, $h_2$, ...).
 
 ![Responsibility concept](figures/concept.png)
 
-**Shared Responsibility (SR) network.** (A) Full neighborhood topology, with nodes colored by PR and directed edges colored by SR. (B) Detail view of Owner 12 (highest degree), showing the overlapping defensible-space regions with neighbors 27, 29, 40, and 56. (C) Circular layout emphasizing the interconnected SR relationships, with Owner 12's connections highlighted in red.
+## 📊 Results
+
+All figures below are generated from the demonstration study site (`data/`) in `notebooks/main.ipynb`. Node color encodes Personal Responsibility (PR), and link color and direction represents Shared (SR) or Owed (OR) Responsibility.
+
+**Shared Responsibility (SR) network.** (A) Nodes colored by PR and directed links colored by SR. (B) Detail view of Owner 12 (highest degree) showing the overlapping regions with neighbors 27, 29, 40, and 56. (C) Circular layout emphasizing the interconnected SR relationships with Owner 12's connections highlighted in red.
 
 ![SR network](figures/sr_network.png)
 
-**Owed Responsibility (OR) network.** (A) Full neighborhood topology, with directed edges colored by OR. (B) Detail view of Owner 47, whose own defensible space does not directly overlap neighbor 64's, but each still owes OR to the other based on whose parcel the buffer spillover lands on. (C) Circular layout with Owner 47's connections highlighted in red.
+**Owed Responsibility (OR) network.** (A) Nodes colored by PR and directed links colored by OR. (B) Detail view of Owner 47 as an OR example with neighbors 46 and 64. (C) Circular layout with Owner 47's connections highlighted in red.
 
 ![OR network](figures/or_network.png)
 
-**Mitigation simulation via network link removal.** Total (A) SR and (B) OR remaining as links are removed under three strategies (random, localized, targeted). The top row of each panel shows the number of active sub-networks; the targeted strategy reduces total responsibility fastest (lowest AUC) by fragmenting the network into smaller components first.
+**Mitigation simulation via network link removal.** Total (A) SR and (B) OR remaining as links are iteratively removed via three strategies (random, localized, targeted). The top row of each panel shows the number of active sub-networks. To interpret, the *targeted* strategy reduces the total responsibility fastest (i.e., lowest AUC) and is thus the most effective for community-wide mitigation.
 
 ![Link removal simulation](figures/link_removal.png)
 
@@ -68,7 +67,7 @@ pip install -r requirements.txt
 ```
 
 The repo contains the study area (demonstration neighborhood) `data/` for `notebooks/main.ipynb`. 
-To use different study area datasets, replace `data_path` in the notebook with your own `bldgs.shp`/`parcels.shp` (and your own risk raster for `risk_path`).
+To use different study areas, replace `data_path` in the notebook with your own `bldgs.shp`/`parcels.shp` (and your own risk raster for `risk_path`).
 
 ## 📖 Citation
 
