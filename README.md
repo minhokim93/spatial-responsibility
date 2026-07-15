@@ -7,11 +7,8 @@ Explore the spatial responsibility maps and networks through this interactive vi
 
 ## 📌 Main Highlights
 * Multi-parcel assessment of responsibility to map interdependent wildfire risk at individual property scale
-* 
 * Novel spatial metrics map homeowner's responsibility to mitigate risk in overlapping defensible space buffers
-* 
 * Spatial networks of shared and owed responsibility can map and measure spatial spillovers
-* 
 * Simulation of three scenarios for neighborhood-wide mitigation via network link removal
   
 ## Background
