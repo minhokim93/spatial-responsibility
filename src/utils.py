@@ -1,12 +1,40 @@
+import math
+
 import numpy as np
 import geopandas as gpd
 import rasterio
 from rasterio.features import geometry_mask
 from shapely.ops import unary_union
+from matplotlib.ticker import FuncFormatter
 
 BASE_CRS = 'EPSG:3857'
 GEO_CRS = 'EPSG:4326'
+SQM_TO_SQFT = 10.7639
 
+
+def format_sig_figs_compact(x, sig=3):
+    """Round significant figures with a K/M/B suffix"""
+
+    if x == 0 or not np.isfinite(x):
+        return '0'
+    abs_x = abs(x)
+    if abs_x >= 1e9:
+        divisor, suffix = 1e9, 'B'
+    elif abs_x >= 1e6:
+        divisor, suffix = 1e6, 'M'
+    elif abs_x >= 1e3:
+        divisor, suffix = 1e3, 'K'
+    else:
+        divisor, suffix = 1, ''
+
+    scaled = x / divisor
+    magnitude = math.floor(math.log10(abs(scaled)))
+    decimals = max(sig - magnitude - 1, 0)
+    rounded = round(scaled, decimals)
+
+    return f'{rounded:,.{decimals}f}{suffix}'
+
+sigfig_formatter_compact = FuncFormatter(lambda x, pos: format_sig_figs_compact(x)) # needed in plot
 
 def open_asc(file_path):
     with rasterio.open(file_path, 'r') as src:
@@ -45,12 +73,8 @@ def minmax_values_sr(gdf):
     for column in gdf.columns:
         gdf[column] = gdf[column].apply(lambda x: 0 if x is None or x == [] else x)
 
-    # SR_owner/SR_neighbors are per-neighbor lists -- combine and flatten before min/max
-    combined_sr = [
-        [sum(x) for x in zip(owner, neighbors)] if isinstance(owner, list) else owner + neighbors
-        for owner, neighbors in zip(gdf['SR_owner'], gdf['SR_neighbors'])
-    ]
-    sr_flat = [v for sub in combined_sr if isinstance(sub, list) for v in sub] + [v for v in combined_sr if not isinstance(v, list)]
+    # SR_owner is the receiving node's own-parcel share
+    sr_flat = [v for sub in gdf['SR_owner'] if isinstance(sub, list) for v in sub] + [v for v in gdf['SR_owner'] if not isinstance(v, list)]
     or_flat = [v for sub in gdf['OR'] if isinstance(sub, list) for v in sub] + [v for v in gdf['OR'] if not isinstance(v, list)]
 
     sr_min, sr_max = np.nanmin(sr_flat), np.nanmax(sr_flat)

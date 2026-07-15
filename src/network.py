@@ -17,18 +17,18 @@ import pandas as pd
 import geopandas as gpd
 import networkx
 import networkx as nx
+from utils import SQM_TO_SQFT
 
 
 # ---------------------------------------------------------------------------
 # 1. Network construction
 # ---------------------------------------------------------------------------
+def build_network_v2(gdf, edge_variable='SR', node_variable='TR', crs1=None, crs2=None, directed=False, weight_by='responsibility'):
+    '''
+    weight_by='responsibility' (default): Link weight is Area x Risk metric giving product [ft^3/min]
+    weight_by='area': Link weight is overlapping raw area [ft^2] unweighted by risk.
+    '''
 
-def build_network(gdf, edge_variable='SR', node_variable='TR', crs1=None, crs2=None, directed=False):
-    """
-    Builds a directed spatial responsibility network from a computed responsibility GDF (as output of `compute_responsibility`).
-
-    Nodes are placed at each building's centroid and weighted by `node_variable` (i.e., PR). Links are weighted by `edge_variable`
-    """
     if crs1:
         gdf = gdf.set_crs(crs1)
     if crs2:
@@ -38,52 +38,67 @@ def build_network(gdf, edge_variable='SR', node_variable='TR', crs1=None, crs2=N
     centroids = gdf['geometry'].centroid
     centroids_gdf = gpd.GeoDataFrame(geometry=centroids, crs=gdf.crs)
 
-    # Create a NetworkX graph
+    # Build responsibility (or area) networks
     if directed:
         G = nx.DiGraph()
     else:
         G = nx.Graph()
 
-    # Add nodes to the graph
     for idx, centroid in centroids_gdf.iterrows():
         G.add_node(idx, pos=(centroid.geometry.x, centroid.geometry.y), TR=gdf.loc[idx, node_variable])
 
-    # Add links (avg SR and OR)
+    # Add links to network (avg SR and OR)
     for i, row_i in gdf.iterrows():
 
         if edge_variable == 'SR':
-            # Shared Responsibility (owner's + neighbor's portions, combined per row)
+            # SR (Owner and neighbors) --> Cumulative
             if isinstance(row_i['SR_ID'], (list, tuple, np.ndarray)):
                 for n, j in enumerate(row_i['SR_ID']):
-                    if i != j:  # Avoid self-loops
-                        sr_owner_ij = row_i['SR_owner']
-                        sr_neighbors_ij = row_i['SR_neighbors']
-                        sr_total_ij = np.add(sr_owner_ij, sr_neighbors_ij)[n]
+                    if i != j: # Avoid self-loops
+
+                        # Area-weighted links
+                        if weight_by == 'area':
+                            sr_total_ij = row_i['SR_area'][n] * SQM_TO_SQFT
+                        
+                        # SR links
+                        else:
+                            # SR_owner gives SR value of owner i's specific parcel share given "n" neighbors
+                            # Hence: SR_total_ij includes all SR_ij summed together
+                            sr_owner_ij = row_i['SR_owner']
+                            sr_total_ij = sr_owner_ij[n]
 
                         if sr_total_ij is not None:
-                            if isinstance(sr_total_ij, float) and math.isnan(sr_total_ij):
+                            if sr_total_ij == 'nan' or None:
                                 sr_total_ij = 0
                             G.add_edge(i, j, SR=sr_total_ij)
 
         elif edge_variable == 'OR':
-            # Owed Responsibility (IN direction --> Area on this owner's own parcel -- "this owner owes it")
+            # OR (IN direction --> Find area on owner i's parcel)
             if isinstance(row_i['owed_ID'], (list, tuple, np.ndarray)):
                 for n, k in enumerate(row_i['owed_ID']):
-                    if i != k:  # Avoid self-loops
-                        or_ij = row_i['OR'][n]
+                    if i != k: # Avoid self-loops
 
+                        # Area-weighted links
+                        or_ij = row_i['owed_overlap_area'][n] * SQM_TO_SQFT if weight_by == 'area' else row_i['OR'][n]
+
+                        # OR_in links
                         if or_ij is None or (isinstance(or_ij, float) and math.isnan(or_ij)):
                             or_ij = 0
-                        # Edge points TO whoever owes
+                        # Link points to whoever owes whom (i.e., Row i's owed_ID/OR is in the IN direction)
+                        # so "i" is the one who owes (i's DS does not cover) and arrow directs to "i" 
+                        # Formally: D_k \cap t_i \ D_i (DS of neighbor K overlaps with parcel of owner i but NOT with DS of owner i)
                         G.add_edge(k, i, OR=or_ij)
 
         elif edge_variable == 'OR_out':
-            # Owed Responsibility (OUT direction --> Area on each neighbor's parcel -- "that neighbor owes it")
+            # OR in OUT direction (i.e., neighbor owes it)
             if isinstance(row_i['owed_ID_out'], (list, tuple, np.ndarray)):
                 for n, k in enumerate(row_i['owed_ID_out']):
-                    if i != k:  # Avoid self-loops
-                        or_ij = row_i['OR_out'][n]
+                    if i != k: # Avoid self-loops
 
+                        # Area-weighted links
+                        or_ij = row_i['owed_overlap_area_out'][n] * SQM_TO_SQFT if weight_by == 'area' else row_i['OR_out'][n]
+
+                        # OR_out links
                         if or_ij is None or (isinstance(or_ij, float) and math.isnan(or_ij)):
                             or_ij = 0
                         G.add_edge(i, k, OR_out=or_ij)
@@ -91,12 +106,12 @@ def build_network(gdf, edge_variable='SR', node_variable='TR', crs1=None, crs2=N
     return G
 
 
+
+
 def subnetworks(G_edges, variable='SR', directed=False):
     """
     Rebuilds a graph from G_edges using weighted links
-    
-    Returns output which has one entry per connected component (subnetwork) including: node set, edge weights, link/node counts,
-    and total/average responsibility
+    Returns output which has one entry per connected component (subnetwork)
     """
 
     results_dict = {'subnetwork_nodes': [], 'subnetwork_risk': [], 'n_links': [], 'n_nodes': [], 'total_risk': [], 'avg_risk': []}
@@ -469,29 +484,3 @@ def run_simulation_multiseed(G_pre, variable, interval, seeds=range(1, 11)):
             total_by_fraction['seed'] = seed
             rows.append(total_by_fraction)
     return pd.concat(rows, ignore_index=True)
-
-
-# def track_edges_removed(G_pre, variable, mode, interval=0.01, seed=42):
-
-#     rng = random.Random(seed)
-#     state = {}
-#     G_curr = G_pre.copy()
-#     n_total_edges = len(G_curr.edges(data=variable))
-#     step_size = max(1, int(interval * n_total_edges))
-#     num_steps = int(1 / interval) + 1
-
-#     records = [{'fraction': 0.0, 'edges_remaining': G_curr.number_of_edges(), 'edges_removed_this_step': 0}]
-#     current_fraction = 0.0
-#     for _ in range(1, num_steps):
-#         current_fraction += interval
-#         if current_fraction > 1.0:
-#             break
-#         before = G_curr.number_of_edges()
-#         G_curr = percolate_graph(G_curr, variable=variable, mode=mode, num_sample=step_size, rng=rng, state=state)
-#         after = G_curr.number_of_edges()
-#         records.append({
-#             'fraction': current_fraction,
-#             'edges_remaining': after,
-#             'edges_removed_this_step': before - after,
-#         })
-#     return pd.DataFrame(records)

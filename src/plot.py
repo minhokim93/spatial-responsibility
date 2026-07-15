@@ -1,10 +1,3 @@
-"""
-All figures: parcel-level responsibility maps and histograms (Fig. 3),
-whole-neighborhood PR/SR/OR region maps (Fig. 4B/5B), the network topology
-plot (Fig. 4A/5A), and the percolation-simulation figures used to compare
-Random / Localized / Targeted link-removal strategies (Fig. 6, 7, S3-S6).
-"""
-
 import random
 from typing import Optional
 
@@ -19,6 +12,7 @@ import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 import networkx as nx
 from matplotlib.patches import Patch
+import matplotlib.colors as colors
 from matplotlib.lines import Line2D
 from matplotlib.legend_handler import HandlerBase
 from matplotlib.ticker import FixedLocator, NullLocator, FuncFormatter
@@ -27,15 +21,12 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from IPython.display import HTML
 
-from utils import replace_none_nan, BASE_CRS, GEO_CRS
+from utils import replace_none_nan, BASE_CRS, GEO_CRS, SQM_TO_SQFT, format_sig_figs_compact, sigfig_formatter_compact
 from geometry import compute_component_regions
-from network import percolate_graph, track_edges_removed, run_simulation
+from network import percolate_graph, run_simulation
 
 
-# ---------------------------------------------------------------------------
-# 1. Parcel-level summary (Fig. 3)
-# ---------------------------------------------------------------------------
-
+# 1. Parcel-level summary
 def plot_summary(
     gdf_results: gpd.GeoDataFrame,
     bldgs: Optional[gpd.GeoDataFrame] = None,
@@ -52,43 +43,75 @@ def plot_summary(
     or_max: Optional[float] = None,
     save: Optional[str] = None,
     histogram_height_ratio: float = 0.5,
-    FIGURE_WIDTH: float = 15,
-    FIGURE_HEIGHT: float = 5,
-    LABEL_SIZE: int = 15,
+    histogram_width_ratio: float = 1.0, # Kept for consistency, though currently 1.0
+    FIGURE_WIDTH: float = 15, # Using your specified default
+    FIGURE_HEIGHT: float = 5,  # Using your specified default
+    LABEL_SIZE=15
 ) -> None:
-    """
-    Summary figure: TR/PR/SR/OR choropleth maps (top row) with their
-    corresponding histograms (bottom row) -- matches the paper's Fig. 3.
-    """
+    
     ALPHA = 0.5
     LINE_WIDTH = 1.5
     TITLE_SIZE = 24
     N_BINS = 20
 
+    _sigfig_format = sigfig_formatter_compact
+
+    # TR (Panel A) sums PR + SUM(SR_owner) + SUM(OR) per row (elemntwise sum)
+    _sum_list = lambda x: np.nansum(x) if isinstance(x, (list, tuple, np.ndarray)) else (x if x else 0)
+    gdf_results['SR_owner_total'] = gdf_results['SR_owner'].apply(_sum_list)
+    gdf_results['OR_total'] = gdf_results['OR'].apply(_sum_list)
+
+    # Plot
     fig, axs = plt.subplots(
         2, 4,
         figsize=(FIGURE_WIDTH, FIGURE_HEIGHT),
-        gridspec_kw={'height_ratios': [1, histogram_height_ratio], 'width_ratios': [1, 1, 1, 1]}
+        gridspec_kw={
+            'height_ratios': [1, histogram_height_ratio],
+            'width_ratios': [1, 1, 1, 1] # Ensure equal width for all columns
+        }
     )
+
     ax = axs.flatten()
 
-    # --- Top row: maps ---
-    map_columns = ['TR', 'PR', 'SR_owner_avg', 'OR_avg']
+    # Prioritize bldgs gdf for extent, o/w use gdf_results
+    if bldgs is not None and not bldgs.empty:
+        minx, miny, maxx, maxy = bldgs.total_bounds
+    elif not gdf_results.empty:
+        minx, miny, maxx, maxy = gdf_results.total_bounds
+    else:
+        minx, miny, maxx, maxy = 0, 0, 1, 1 # Default
+
+    # Plot responsibility maps
+    map_columns = ['TR', 'PR', 'SR_owner_total', 'OR_total']
     map_cmaps = ['bone_r', 'Greens', 'Reds', 'Blues']
     map_titles = ['Total', 'PR', 'SR', 'OR']
     panel_labels = ['A', 'B', 'C', 'D']
-    min_vals = [tr_min, sr_min, pr_min, or_min]
-    max_vals = [tr_max, sr_max, pr_max, or_max]
+    min_vals = [tr_min, pr_min, sr_min, or_min]
+    max_vals = [tr_max, pr_max, sr_max, or_max]
 
     for i, col in enumerate(map_columns):
-        gdf_results.plot(ax=ax[i], column=col, cmap=map_cmaps[i], alpha=ALPHA,
-                          edgecolor='none', vmin=min_vals[i], vmax=max_vals[i])
-        norm = mcolors.Normalize(vmin=min_vals[i], vmax=max_vals[i])
+        # Plot main data
+        gdf_results.plot(
+            ax=ax[i],
+            column=col,
+            cmap=map_cmaps[i],
+            alpha=ALPHA,
+            edgecolor='none',
+            vmin=min_vals[i],
+            vmax=max_vals[i]
+        )
+        norm = colors.Normalize(vmin=min_vals[i], vmax=max_vals[i])
         sm = cm.ScalarMappable(cmap=map_cmaps[i], norm=norm)
         sm._A = []
-        cbar = fig.colorbar(sm, ax=ax[i])
+        cbar = fig.colorbar(sm, ax=ax[i], format=_sigfig_format) 
         cbar.ax.tick_params(labelsize=LABEL_SIZE)
 
+        # # Set consistent x and y limits for all map plots
+        # ax[i].set_xlim(minx, maxx)
+        # ax[i].set_ylim(miny, maxy)
+
+        # Overlays: Plot buildings, destroyed, spared
+        # Check if bldgs is not empty before attempting to plot its bounds
         if bldgs is not None and not bldgs.empty:
             bldgs.plot(ax=ax[i], color='none', edgecolor='k', linewidth=0.5)
         if destroyed is not None and not destroyed.empty:
@@ -96,37 +119,48 @@ def plot_summary(
         if spared is not None and not spared.empty:
             spared.plot(ax=ax[i], color='lightblue', edgecolor='k', linewidth=0.5)
 
-        ax[i].set_title(f"$\\bf{{{panel_labels[i]}}}$      {map_titles[i]}", size=TITLE_SIZE, loc='left')
+        ax[i].set_title(
+            f"$\\bf{{{panel_labels[i]}}}$      {map_titles[i]}",
+            size=TITLE_SIZE, 
+            loc='left'
+        )
         ax[i].set_xticks([])
         ax[i].set_yticks([])
 
-    # --- Bottom row: histograms ---
-    histogram_columns = ['TR', 'PR', 'SR_owner_avg', 'OR_avg']
+    # Plot kdeplots
+    histogram_columns = ['TR', 'PR', 'SR_owner_total', 'OR_total']
     histogram_colors = ['k', 'g', 'r', 'lightblue']
     histogram_titles = ['Total', 'PR', 'SR', 'OR']
 
     for j, col in enumerate(histogram_columns):
-        idx = j + 4
-        sns.histplot(x=gdf_results[col], color=histogram_colors[j], linewidth=LINE_WIDTH,
-                     label=histogram_titles[j], bins=N_BINS, ax=ax[idx])
-        ax[idx].tick_params(axis='both', labelsize=LABEL_SIZE)
-        ax[idx].set_xlabel(histogram_titles[j], size=LABEL_SIZE)
+        idx = j + 4 # Index for flattened array
+        sns.histplot(
+            x=gdf_results[col],
+            color=histogram_colors[j],
+            linewidth=LINE_WIDTH, 
+            label=histogram_titles[j],
+            bins=N_BINS, 
+            ax=ax[idx]
+        )
+        ax[idx].tick_params(axis='both', labelsize=LABEL_SIZE) 
+        ax[idx].xaxis.set_major_formatter(_sigfig_format) 
+        ax[idx].set_xlabel(histogram_titles[j], size=LABEL_SIZE) 
         ax[idx].set_ylabel("")
 
-    ax[4].set_ylabel("Count", fontsize=16)
+    ax[4].set_ylabel("Count", fontsize=16) 
 
     plt.tight_layout()
+
     if save:
         plt.savefig(save, dpi=300, bbox_inches='tight')
+
     plt.show()
 
 
-# ---------------------------------------------------------------------------
-# 2. Whole-neighborhood PR/SR/OR region maps (Fig. 4B/5B)
-# ---------------------------------------------------------------------------
 
+# Whole-neighborhood PR/SR/OR region maps
 def plot_component_map(gdf_results, component='PR', site=None, figsize=(14, 10), color=None, save=False):
-    """Plots every PR / SR / OR region across the whole neighborhood on one map."""
+
     color_map = {'PR': 'seagreen', 'SR': 'gold', 'OR': 'royalblue'}
     color = color or color_map[component]
 
@@ -157,11 +191,7 @@ def plot_component_map(gdf_results, component='PR', site=None, figsize=(14, 10),
 
 def plot_SR_OR_map(gdf_results, sr_regions=None, or_regions=None, site=None, bldgs=None,
                     figsize=(14, 10), save=False):
-    """
-    Combined whole-neighborhood map showing SR and OR regions together (PR
-    omitted), with building footprints in black. Pass in already-computed
-    sr_regions/or_regions to avoid recomputing them.
-    """
+
     if sr_regions is None:
         sr_regions = compute_component_regions(gdf_results, component='SR')
     if or_regions is None:
@@ -203,11 +233,7 @@ def plot_SR_OR_map(gdf_results, sr_regions=None, or_regions=None, site=None, bld
 
 def plot_PR_SR_OR_map(gdf_results, pr_regions=None, sr_regions=None, or_regions=None,
                        site=None, bldgs=None, figsize=(14, 10), save=False):
-    """
-    Combined whole-neighborhood map showing PR, SR, and OR regions together
-    -- same style as plot_SR_OR_map, with PR added in. Pass in already-
-    computed pr_regions/sr_regions/or_regions to avoid recomputing them.
-    """
+
     if pr_regions is None:
         pr_regions = compute_component_regions(gdf_results, component='PR')
     if sr_regions is None:
@@ -254,10 +280,60 @@ def plot_PR_SR_OR_map(gdf_results, pr_regions=None, sr_regions=None, or_regions=
     plt.show()
 
 
-# ---------------------------------------------------------------------------
-# 3. Network topology plot (Fig. 4A/5A)
-# ---------------------------------------------------------------------------
+def plot_area_and_responsibility_totals(gdf_results, pr_regions, sr_regions, or_regions, comp_rank_or,
+                                         label_size=16, figsize=(12, 5), save=False):
 
+    lw = 1
+    fig, ax = plt.subplots(1, 2, figsize=figsize)
+
+    area_labels = ['Personal', 'Shared', 'Owed']
+    area_colors = ['seagreen', 'gold', 'royalblue']
+    area_values = [
+        pr_regions.area.sum() * SQM_TO_SQFT,
+        sr_regions.area.sum() * SQM_TO_SQFT,
+        or_regions.area.sum() * SQM_TO_SQFT,
+    ]
+
+    ax[0].bar(area_labels, area_values, color=area_colors, alpha=0.7, edgecolor='k', linewidth=lw)
+    ax[0].set_ylabel("Total Area [$ft^2$]", size=label_size)
+    ax[0].tick_params(axis='both', labelsize=label_size)
+    ax[0].yaxis.set_major_formatter(sigfig_formatter_compact)
+    ax[0].legend(handles=[Patch(facecolor=c, alpha=0.7, edgecolor='k', label=l)
+                           for l, c in zip(area_labels, area_colors)],
+                 loc='best', fontsize=label_size - 4)
+
+    sr_total_true = 0.0
+    for row_sr_owner in gdf_results['SR_owner']:
+        if isinstance(row_sr_owner, (list, tuple, np.ndarray)):
+            sr_total_true += np.nansum(row_sr_owner)
+        elif row_sr_owner:
+            sr_total_true += row_sr_owner
+
+    resp_labels = ['Personal', 'Shared', 'Owed']
+    resp_colors = ['seagreen', 'gold', 'royalblue']
+    resp_values = [
+        np.nansum(gdf_results['PR']),
+        sr_total_true,
+        comp_rank_or['total_risk'].sum(),
+    ]
+
+    ax[1].bar(resp_labels, resp_values, color=resp_colors, alpha=0.7, edgecolor='k', linewidth=lw)
+    ax[1].set_ylabel("Total Responsibility [$ft^3/min$]", size=label_size)
+    ax[1].tick_params(axis='both', labelsize=label_size)
+    ax[1].yaxis.set_major_formatter(sigfig_formatter_compact)
+    ax[1].legend(handles=[Patch(facecolor=c, alpha=0.7, edgecolor='k', label=l)
+                           for l, c in zip(resp_labels, resp_colors)],
+                 loc='best', fontsize=label_size - 4)
+
+    plt.tight_layout()
+    if save:
+        plt.savefig(save, dpi=300, bbox_inches='tight')
+    plt.show()
+
+    return area_values, resp_values
+
+
+# Network topology plot
 def plot_network(
     G,
     variable='SR',
@@ -270,7 +346,7 @@ def plot_network(
     node_size=200,
     font_size=10,
     label_size=14,
-    cbar_pad=-0.075,
+    cbar_pad=-0.075, # For colorbar
     site=None,
     arrowsize=15,
     ds=None,
@@ -283,88 +359,139 @@ def plot_network(
     basemap=False,
     basemap_source=None,
     labeling=True,
+    edge_unit_label='ft^3/min',
+    node_unit_label='ft^3/min',
+    edge_variable_label=None,  
+    cbar_tick_style='categorical', 
+    cbar_tick_fontsize=None 
 ):
-    """
-    Draws a responsibility network on top of the site/defensible-space
-    polygons: nodes colored by `node_variable` (typically PR), directed
-    edges colored by `variable` (SR or OR), with two horizontal colorbars.
-
-    node_variable_label, cbar_pad, caption, basemap, and basemap_source are
-    accepted but currently unused (kept for call-signature compatibility).
-    """
+    import matplotlib.pyplot as plt
+    import matplotlib
+    import networkx as nx
+    from matplotlib.colors import Normalize
+    from matplotlib.ticker import FuncFormatter
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    
     fig, ax = plt.subplots(1, figsize=(figsize_x, figsize_y))
     ax.set_aspect(1)
 
+    tick_fontsize = cbar_tick_fontsize
+    if tick_fontsize is None:
+        tick_fontsize = max(label_size - 12, 9) if cbar_tick_style == 'categorical' else label_size - 2
     if site is not None:
         site.plot(ax=ax, color='none', edgecolor='gray', alpha=0.5)
     if ds is not None:
         ds.plot(ax=ax, color='aliceblue', edgecolor='royalblue', linestyle='--', alpha=0.15)
 
+    # Plot neighborhood network
     node_positions = nx.get_node_attributes(G, 'pos')
-    node_TR = nx.get_node_attributes(G, node_variable)
-    cmap_TR = plt.get_cmap(node_colormap)
+
+    node_TR = replace_none_nan(nx.get_node_attributes(G, node_variable))
+    cmap_TR = plt.cm.get_cmap(node_colormap)
 
     nx.draw_networkx_nodes(
-        G, pos=node_positions, node_size=node_size, cmap=cmap_TR,
-        node_color=list(node_TR.values()), alpha=0.8, edgecolors='black',
-        linewidths=1.5, vmin=node_vmin, vmax=node_vmax,
+        G,
+        pos=node_positions,
+        node_size=node_size,
+        cmap=cmap_TR,
+        node_color=list(node_TR.values()),
+        alpha=0.8,
+        edgecolors='black', # Ensure node borders are black
+        linewidths=1.5,    # Increased from 1 to make borders more visible
+        vmin=node_vmin,
+        vmax=node_vmax
     )
 
     if labeling:
         node_labels = {idx: str(idx) for idx in G.nodes}
         nx.draw_networkx_labels(G, pos=node_positions, labels=node_labels, font_size=font_size, font_color='k')
 
+    # Link attributes
     edge_var = replace_none_nan(nx.get_edge_attributes(G, variable))
     unique_values = list(edge_var.values()) if edge_var else [0]
-    cmap_edge = plt.get_cmap(colormap)
+    cmap_edge = plt.cm.get_cmap(colormap)
 
     for edge, value in edge_var.items():
         nx.draw_networkx_edges(
-            G, pos=node_positions, edgelist=[edge], width=3, edge_color=[value],
-            edge_cmap=cmap_edge, arrowstyle="->", connectionstyle='arc3,rad=0.3',
-            arrowsize=arrowsize, edge_vmin=edge_vmin, edge_vmax=edge_vmax,
+            G,
+            pos=node_positions,
+            edgelist=[edge],
+            width=3,
+            edge_color=[value],
+            edge_cmap=cmap_edge,
+            arrowstyle="->",
+            connectionstyle='arc3,rad=0.3',
+            arrowsize=arrowsize,
+            edge_vmin=edge_vmin,
+            edge_vmax=edge_vmax
         )
 
+    # Lat/lon axis labels (for geographic info)
     def lat_lon_formatter(x, pos):
         return f"{x:.4f}"
     ax.xaxis.set_major_formatter(FuncFormatter(lat_lon_formatter))
     ax.yaxis.set_major_formatter(FuncFormatter(lat_lon_formatter))
 
-    # Node colorbar (bottom right, upper)
+    # Node colorbar (PR)
+    node_vmax_eff = node_vmax if node_vmax is not None else max(node_TR.values())
     sm_TR = matplotlib.cm.ScalarMappable(
-        cmap=cmap_TR, norm=mcolors.Normalize(vmin=0, vmax=node_vmax if node_vmax is not None else max(node_TR.values())))
+        cmap=cmap_TR,
+        norm=Normalize(vmin=0, vmax=node_vmax_eff)
+    )
     sm_TR.set_array([])
-    cbar_ax1 = inset_axes(ax, width="18%", height="2%", loc='lower right',
-                          bbox_to_anchor=(-0.035, 0.25, 1, 1), bbox_transform=ax.transAxes, borderpad=0)
-    cbar_TR = fig.colorbar(sm_TR, cax=cbar_ax1, orientation='horizontal')
-    cbar_TR.set_label(label="PR [$ft^3/min$]", fontsize=label_size, rotation=0, labelpad=5)
-    cbar_TR.ax.tick_params(labelsize=label_size - 2)
-    cbar_TR.ax.xaxis.set_ticks_position('bottom')
+    cbar_ax1 = inset_axes(ax,
+                          width="18%",    # Width of colorbar
+                          height="2%",    # Height of colorbar
+                          loc='lower right',
+                          bbox_to_anchor=(-0.035, 0.25, 1, 1),  # (x0, y0, width, height) in axes coordinates
+                          bbox_transform=ax.transAxes,
+                          borderpad=0)
 
-    # Edge colorbar (bottom right, lower)
+    cbar_TR = fig.colorbar(sm_TR, cax=cbar_ax1, orientation='horizontal')
+    cbar_TR.set_label(label=f"PR [${node_unit_label}$]", fontsize=label_size, rotation=0, labelpad=5)
+    cbar_TR.ax.xaxis.set_ticks_position('bottom')
+    
+    # Colorbar formatting (Categorical --> Low to high / sigfigs)
+    if cbar_tick_style == 'categorical':
+        cbar_TR.set_ticks([0, node_vmax_eff])
+        cbar_TR.set_ticklabels([format_sig_figs_compact(0), format_sig_figs_compact(node_vmax_eff)])
+    cbar_TR.ax.tick_params(labelsize=tick_fontsize)
+
+    # Link colorbar (SR or OR)
+    edge_vmax_eff = edge_vmax if edge_vmax is not None else max(unique_values)
     sm = matplotlib.cm.ScalarMappable(
-        cmap=cmap_edge, norm=mcolors.Normalize(vmin=0, vmax=edge_vmax if edge_vmax is not None else max(unique_values)))
+        cmap=cmap_edge,
+        norm=Normalize(vmin=0, vmax=edge_vmax_eff)
+    )
     sm.set_array([])
-    cbar_ax2 = inset_axes(ax, width="18%", height="2%", loc='lower right',
-                          bbox_to_anchor=(-0.035, 0.12, 1, 1), bbox_transform=ax.transAxes, borderpad=0)
+
+    # Colorbar formatting with sigfig
+    cbar_ax2 = inset_axes(ax,
+                          width="18%",    # Width of colorbar
+                          height="2%",    # Height of colorbar
+                          loc='lower right',
+                          bbox_to_anchor=(-0.035, 0.12, 1, 1),  # Lower position
+                          bbox_transform=ax.transAxes,
+                          borderpad=0)
+
     cbar = fig.colorbar(sm, cax=cbar_ax2, orientation='horizontal')
-    cbar.set_label(label=f"{variable} [$ft^3/min$]", fontsize=label_size, rotation=0, labelpad=5)
-    cbar.ax.tick_params(labelsize=label_size - 2)
+    edge_label_text = edge_variable_label if edge_variable_label is not None else variable
+    cbar.set_label(label=f"${edge_label_text}$ [${edge_unit_label}$]", fontsize=label_size, rotation=0, labelpad=5)
     cbar.ax.xaxis.set_ticks_position('bottom')
+    if cbar_tick_style == 'categorical':
+        cbar.set_ticks([0, edge_vmax_eff])
+        cbar.set_ticklabels([format_sig_figs_compact(0), format_sig_figs_compact(edge_vmax_eff)])
+    cbar.ax.tick_params(labelsize=tick_fontsize)
 
     if save:
         plt.savefig(save, dpi=300, bbox_inches='tight')
-    plt.show()
 
+    plt.show()
     return edge_var
 
 
-# ---------------------------------------------------------------------------
-# 4. Network link removal simulation
-# ---------------------------------------------------------------------------
-
 class HandlerColormap(HandlerBase):
-    """Legend handler that draws a colormap gradient swatch (used by plot_results_final)."""
+    """Handler to draw colormap gradient used by `plot_results_final`for network link removal """
 
     def __init__(self, cmap, num_stripes=40, low=0.0, high=1.0, **kwargs):
         self.cmap = cmap
@@ -400,16 +527,7 @@ def plot_results_final(results,
                         bar_width=1,
                         overlay_lines=True,
                         num_colors=None):
-    """
-    Two-row figure per strategy (Random / Localized / Targeted): number of
-    live subnetworks over the removal fraction (top), and a stacked bar of
-    each subnetwork's share of total responsibility with a total-overlay
-    line (bottom) -- matches the paper's Fig. 6.
 
-    num_colors: individually-colored subnetwork ranks per panel before the
-    rest bucket into "Other". Defaults to the max co-existing subnetwork
-    count across all strategies in `results`, so every panel shares scale.
-    """
     modes = list(results.keys())
 
     if len(modes) == 1:
@@ -422,10 +540,7 @@ def plot_results_final(results,
 
     risk_col = f'total_{variable_label.lower()}'
 
-    # Max subnetwork count across all strategies in this call -- used as the
-    # shared num_colors/Y-scale/palette length for every panel (unless
-    # explicitly overridden), so panels stay directly comparable and no
-    # subnetwork from any strategy falls into "Other" that wouldn't in another.
+    # Max subnetwork count across all strategies used as shared color scale for every panel
     max_subnetworks_global = 0
     for mode in modes:
         df = results[mode]['data']
@@ -445,7 +560,7 @@ def plot_results_final(results,
         theme_color = theme_colors[idx]
         mode_num_colors = num_colors if num_colors is not None else max_subnetworks_global
 
-        # --- Top plot: subnetwork count ---
+        # Plot n_subnetwork
         active_df = df[df[risk_col] > 0]
         if not active_df.empty:
             ncc_series = active_df.groupby('step')['id'].nunique()
@@ -459,7 +574,7 @@ def plot_results_final(results,
         ax_top.grid(True, axis='x', alpha=0.3)
         ax_top.tick_params('both', labelsize=20, labelbottom=False)
 
-        # --- Bottom plot: stacked responsibility share ---
+        # plot stacked responsibility share
         steps = sorted(df['step'].unique())
         global_max_risk = df[df['step'] == 0][risk_col].sum()
         cmap = plt.get_cmap(cmaps[idx])
@@ -479,9 +594,7 @@ def plot_results_final(results,
             all_rows = step_df.sort_values(by=risk_col, ascending=False)
             row_dict = {'step': step}
 
-            # Bucket subnetworks beyond mode_num_colors into "Other" rather
-            # than dropping them, so the stacked bar / overlay line still
-            # sum to the true total shown in the AUC above.
+            #TODO: FIX: Bucket subnetworks beyond mode_num_colors into "Other" since there may be additional subnetworks that may emerge 
             other_val = 0.0
             for i in range(len(all_rows)):
                 val = (all_rows.iloc[i][risk_col] / global_max_risk) * 100
@@ -493,6 +606,7 @@ def plot_results_final(results,
                 row_dict["Other"] = other_val
             plot_data_list.append(row_dict)
 
+        # Get AUC to quantify mitigation strategy performance
         auc_val = np.trapz(y=auc_y, x=auc_x)
 
         pivot_df = pd.DataFrame(plot_data_list).set_index('step').fillna(0)
@@ -575,10 +689,9 @@ def plot_results_final(results,
 
 def plot_subnetwork_heatmaps(results, variable_label='SR', cmap='YlOrRd', figsize=(30, 16)):
     """
-    Heatmap grid (one column per strategy): top row is total responsibility
-    over the removal fraction, bottom row is each subnetwork's own
-    responsibility, masked outside its birth/death lifespan so a subnetwork's
-    lineage is visually traceable across steps -- matches Fig. S3/S4.
+    Heatmap grid (one column per strategy): T
+        - Top row: Total responsibility (Summed) over the removal fraction
+        - Bottom row: Each subnetwork's own responsibility, masked outside its lifespan. Each subnetwork's lineage is traceable across steps
     """
     modes = list(results.keys())
     n_modes = len(modes)
@@ -705,9 +818,7 @@ def plot_subnetwork_heatmaps(results, variable_label='SR', cmap='YlOrRd', figsiz
 
 def plot_total_risk_curve_aggregated(long_df, variable_label, figsize=(8, 6), label_size=16):
     """
-    Single combined plot: total network responsibility vs. fraction of links
-    removed, one line per removal mode, mean +/- seaborn's default confidence
-    band across seeds (built from run_simulation_multiseed's long_df).
+    Plot total network responsibility vs. fraction of links removed based on multiple seed runs
     """
     colors = {'Random': 'r', 'Localized': 'b', 'Targeted': 'g'}
     markers = {'Random': 'o', 'Localized': '^', 'Targeted': 's'}
@@ -730,54 +841,10 @@ def plot_total_risk_curve_aggregated(long_df, variable_label, figsize=(8, 6), la
     plt.show()
 
 
-def plot_auc_distribution(long_df, G_pre, variable_label, interval, highlight_seed=None, figsize=(7, 5)):
-    """
-    Distribution (across the seeds already in long_df) of AUC of the
-    (fraction, total_risk) curve per removal mode -- lower AUC means risk
-    drops faster. Optionally reruns and highlights one specific seed as a
-    gold star, to show where a single realization falls relative to the
-    full distribution.
-    """
-    risk_col = f'total_{variable_label.lower()}'
-    order = ['Random', 'Localized', 'Targeted']
-    colors = {'Random': 'r', 'Localized': 'b', 'Targeted': 'g'}
-
-    rows = []
-    for (mode, seed), grp in long_df.groupby(['mode', 'seed']):
-        grp = grp.sort_values('fraction')
-        auc = np.trapz(y=grp[risk_col], x=grp['fraction'])
-        rows.append({'mode': mode, 'seed': seed, 'auc': auc})
-    auc_df = pd.DataFrame(rows)
-
-    fig, ax = plt.subplots(1, figsize=figsize)
-    sns.boxplot(data=auc_df, x='mode', y='auc', order=order, palette=colors, ax=ax)
-    sns.swarmplot(data=auc_df, x='mode', y='auc', order=order, color='k', alpha=0.6, size=6, ax=ax)
-
-    if highlight_seed is not None:
-        hl_results = run_simulation(G_pre=G_pre, variable=variable_label, interval=interval, seed=highlight_seed)
-        for i, mode_name in enumerate(order):
-            df_hl = hl_results[mode_name]['data']
-            df_hl = df_hl.groupby('fraction')[risk_col].sum().reset_index().sort_values('fraction')
-            hl_auc = np.trapz(y=df_hl[risk_col], x=df_hl['fraction'])
-            ax.scatter(i, hl_auc, color='gold', edgecolor='k', s=250, zorder=5, marker='*',
-                      label=f'seed={highlight_seed} (used in results_{variable_label.lower()})' if i == 0 else None)
-
-    ax.set_ylabel(f'AUC of Total {variable_label} vs. fraction removed\n(lower = faster reduction)', size=12)
-    ax.set_xlabel('')
-    if highlight_seed is not None:
-        ax.legend(fontsize=10)
-    plt.tight_layout()
-    plt.show()
-
-    return auc_df
-
 
 def animate_percolation(G_pre, variable, mode, mode_name, interval=0.01, seed=42, figsize=(7, 6), fps=4):
     """
-    Inline animation of link removal for a single strategy, advancing one
-    running graph copy frame by frame. Uses an isolated random.Random(seed)
-    plus a persistent `state` dict so Localized's frontier grows correctly
-    across frames instead of reseeding every frame.
+    Animate link removal for each strategy in specific frames
     """
     rng = random.Random(seed)
     state = {'G': G_pre.copy()}
@@ -822,10 +889,7 @@ def animate_percolation(G_pre, variable, mode, mode_name, interval=0.01, seed=42
 def plot_strategy_comparison(G_pre, variable, checkpoints=(0.0, 0.33, 0.66, 1.0),
                               interval=0.05, seed=42, cell_size=(4, 4), save=False):
     """
-    Small-multiples grid: one row per strategy (Random / Localized /
-    Targeted, panel-labeled A/B/C), one column per removal checkpoint.
-    Each panel reports remaining total responsibility as a % of the
-    network's original total. Matches the paper's Fig. S5/S6.
+    Plot link removal for each strategy in specific snapshots at defined intervals (kinda like "show your work")
     """
     modes = {0: 'Random', 1: 'Localized', 2: 'Targeted'}
     mode_colors = {'Random': 'crimson', 'Localized': 'mediumblue', 'Targeted': 'forestgreen'}
@@ -895,49 +959,61 @@ def plot_strategy_comparison(G_pre, variable, checkpoints=(0.0, 0.33, 0.66, 1.0)
     plt.show()
 
 
-def compare_edge_removal(G_pre, variable, interval=0.01, seed=42):
+
+def plot_subnetwork_totals(comp_rank_sr, comp_rank_or, label_size=18, title_size=24, figsize=(14, 9), save=False):
     """
-    Diagnostic: overlays each strategy's actual remaining-edge-count curve
-    (via track_edges_removed) and prints a per-strategy summary, useful for
-    sanity-checking that Localized isn't "wasting" steps by reseeding onto
-    already-isolated nodes.
+    Plot total and average SR/OR per subnetwork grouped by subnetwork size (# of houses) 
     """
-    modes = {0: 'Random', 1: 'Localized', 2: 'Targeted'}
-    fig, ax = plt.subplots(1, figsize=(7, 5))
-    colors = {'Random': 'crimson', 'Localized': 'mediumblue', 'Targeted': 'forestgreen'}
 
-    for mode_code, mode_name in modes.items():
-        df_track = track_edges_removed(G_pre, variable, mode_code, interval=interval, seed=seed)
-        n_wasted = int((df_track['edges_removed_this_step'] == 0).sum())
-        n_total_removed = int(df_track['edges_removed_this_step'].sum())
-        n_final_remaining = int(df_track['edges_remaining'].iloc[-1])
-        print(f"{mode_name:10s}: total removed = {n_total_removed:4d}  "
-              f"steps with 0 removed = {n_wasted:3d}  "
-              f"edges remaining at fraction=1.0 = {n_final_remaining}")
+    fig, axs = plt.subplots(2, 2, figsize=figsize)
+    panel_labels = ['A', 'B', 'C', 'D']
 
-        ax.plot(df_track['fraction'], df_track['edges_remaining'],
-               color=colors[mode_name], lw=2, label=mode_name)
+    num_sr = np.unique(comp_rank_sr['n_nodes'])
+    num_or = np.unique(comp_rank_or['n_nodes'])
 
-    ax.set_xlabel('Fraction of steps completed', size=13)
-    ax.set_ylabel('Edges remaining (actual count)', size=13)
-    ax.set_title(f'{variable}: actual edge count remaining per strategy', size=14)
-    ax.legend(fontsize=11)
+    sns.barplot(data=comp_rank_sr, x='n_nodes', y='total_risk', palette='Blues_r', edgecolor='k',
+                errorbar=("se"), capsize=0.15, order=num_sr[::-1], ax=axs[0, 0])
+    axs[0, 0].set_xlabel("# of houses", size=label_size)
+    axs[0, 0].set_ylabel("Total SR [$ft^3/min$]", size=label_size)
+    axs[0, 0].set_xticklabels([str(n) for n in num_sr[::-1]], fontsize=label_size)
+    axs[0, 0].yaxis.set_major_formatter(sigfig_formatter_compact)
+    axs[0, 0].tick_params(axis='both', labelsize=label_size)
+
+    sns.barplot(data=comp_rank_or, x='n_nodes', y='total_risk', palette='Wistia_r', edgecolor='k', width=0.5,
+                errorbar=("se"), capsize=0.15, order=num_or[::-1], ax=axs[0, 1])
+    axs[0, 1].set_xlabel("# of houses", size=label_size)
+    axs[0, 1].set_ylabel("Total OR [$ft^3/min$]", size=label_size)
+    axs[0, 1].set_xticklabels([str(n) for n in num_or[::-1]], fontsize=label_size)
+    axs[0, 1].yaxis.set_major_formatter(sigfig_formatter_compact)
+    axs[0, 1].tick_params(axis='both', labelsize=label_size)
+
+    sns.barplot(data=comp_rank_sr, x='n_nodes', y='avg_risk', palette='Reds_r', edgecolor='k',
+                order=num_sr[::-1], ax=axs[1, 0])
+    axs[1, 0].set_xlabel("# of houses", size=label_size)
+    axs[1, 0].set_ylabel("Avg SR [$ft^3/min$]", size=label_size)
+    axs[1, 0].set_xticklabels([str(n) for n in num_sr[::-1]], fontsize=label_size)
+    axs[1, 0].yaxis.set_major_formatter(sigfig_formatter_compact)
+    axs[1, 0].tick_params(axis='both', labelsize=label_size)
+
+    sns.barplot(data=comp_rank_or, x='n_nodes', y='avg_risk', palette='Greens', edgecolor='k',
+                order=num_or[::-1], ax=axs[1, 1])
+    axs[1, 1].set_xlabel("# of houses", size=label_size)
+    axs[1, 1].set_ylabel("Avg OR [$ft^3/min$]", size=label_size)
+    axs[1, 1].set_xticklabels([str(n) for n in num_or[::-1]], fontsize=label_size)
+    axs[1, 1].yaxis.set_major_formatter(sigfig_formatter_compact)
+    axs[1, 1].tick_params(axis='both', labelsize=label_size)
+
+    for ax, label in zip(axs.flat, panel_labels):
+        ax.set_title(rf"$\bf{{{label}}}$ ", size=title_size, loc='left')
+
     plt.tight_layout()
+    if save:
+        plt.savefig(save, dpi=300, bbox_inches='tight')
     plt.show()
 
 
-# ---------------------------------------------------------------------------
-# 5. Per-owner SR example (Fig. 5B-style)
-# ---------------------------------------------------------------------------
-
 def plot_SR_example(gdf_results, number=None, one_example=True, save=False):
-    """
-    Draws one owner's DS30, tax parcel, and building, together with every SR
-    neighbor's DS30/tax parcel/building, hatching the owner's vs. neighbors'
-    share of each overlap. `number` picks a specific row (by position); if
-    None, iterates every row with a non-NaN SR_avg. `one_example=True` stops
-    after the first (or after `number`, if given).
-    """
+
     for num in gdf_results[gdf_results['SR_avg'].notna()].index:
 
         if number:
@@ -1006,9 +1082,7 @@ def plot_SR_example(gdf_results, number=None, one_example=True, save=False):
         ]
 
         ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
-        ax.set_title("Owner {} with $SR_{{avg}}$={:.3f} (Owner's: {:.3f}, Neighbors': {:.3f})".format(
-            str(num), gdf_results.iloc[num]['SR_avg'], gdf_results.iloc[num]['SR_owner_avg'], gdf_results.iloc[num]['SR_neighbors_avg']
-        ))
+        ax.set_xticklabels([]);ax.set_yticklabels([])
 
         if save:
             plt.savefig(save, dpi=300, bbox_inches='tight')
@@ -1019,20 +1093,147 @@ def plot_SR_example(gdf_results, number=None, one_example=True, save=False):
             break
 
 
-# ---------------------------------------------------------------------------
-# 6. Circular network topology plot
-# ---------------------------------------------------------------------------
+
+def plot_OR_example(gdf_results, number=None, one_example=True, save=False):
+
+    for num in gdf_results[gdf_results['OR_avg'].notna()].index:
+
+        if number:
+            num = number
+        
+        fig,ax=plt.subplots(1)
+
+        ds30 = gpd.GeoDataFrame([gdf_results.iloc[num]]).set_crs('epsg:3857').to_crs('epsg:4326')
+        ds30_parcel = gpd.GeoDataFrame([gdf_results.iloc[num]], geometry='tax_geometry').set_crs('epsg:3857').to_crs('epsg:4326')
+        bldg_owner = gpd.GeoDataFrame([gdf_results.iloc[num]], geometry='bldg_geometry')
+        
+        ds30.plot(ax=ax, color='red', alpha=0.5, edgecolor='k', label="D_{}".format(str(num)))
+        ds30_parcel.plot(ax=ax, alpha=0.5, color='grey', label="Owner's Tax Parcel")
+        bldg_owner.set_crs('epsg:3857').to_crs('epsg:4326').plot(ax=ax, color='k', label="Owner's Building")
+
+        # Annotate the centroid of owner
+        o_centroid = gpd.GeoDataFrame([gdf_results.iloc[num]], geometry='bldg_geometry').set_crs('epsg:3857').to_crs('epsg:4326').centroid
+        ax.annotate(
+            f"Owner{num}",
+            xy=(o_centroid.x, o_centroid.y),
+            xytext=(0, 0),
+            textcoords="offset points",
+            ha='center',
+            va='center',
+            fontsize=8,
+            color='white'
+        )
+
+        # Find actual spatial neighbors
+        owner_ds30 = gdf_results.iloc[num].geometry
+        owner_parcel = gdf_results.iloc[num]['tax_geometry']
+        
+        spatial_neighbors = []
+        
+        for idx in gdf_results.index:
+            if idx == num: continue
+                
+            neighbor_ds30 = gdf_results.iloc[idx].geometry
+            neighbor_parcel = gdf_results.iloc[idx]['tax_geometry']
+            
+            is_neighbor = (
+                owner_ds30.intersects(neighbor_ds30) or
+                owner_ds30.intersects(neighbor_parcel) or
+                owner_parcel.intersects(neighbor_ds30) or
+                owner_parcel.intersects(neighbor_parcel)
+            )
+            
+            if is_neighbor:
+                spatial_neighbors.append(idx)
+        
+        if not spatial_neighbors:
+            ax.text(0.5, 0.5, f"No spatial neighbors found for Owner {num}", 
+                    transform=ax.transAxes, ha='center', va='center', fontsize=12)
+            plt.show()
+            if one_example:
+                break
+            continue
+        
+
+        for idx in spatial_neighbors:
+
+            # Neighbor geometry and plot
+            ds30_n = gpd.GeoDataFrame([gdf_results.iloc[idx]]).set_crs('epsg:3857').to_crs('epsg:4326')
+            ds30_parcel_n = gpd.GeoDataFrame([gdf_results.iloc[idx]], geometry='tax_geometry').set_crs('epsg:3857').to_crs('epsg:4326')
+            bldg_n = gpd.GeoDataFrame([gdf_results.iloc[idx]], geometry='bldg_geometry').set_crs('epsg:3857')
+            ds30_n.plot(ax=ax, color='none', edgecolor='k', linestyle='--', label="$D_{}$".format(idx))
+            ds30_parcel_n.plot(ax=ax, alpha=0.5, edgecolor='k', color='lightgray', label="$t_{}$".format(idx))
+            bldg_n.to_crs('epsg:4326').plot(ax=ax, alpha=0.5, color='k', label="$h_{}$".format(idx))
+            centroid = gpd.GeoDataFrame([gdf_results.iloc[idx]], geometry='bldg_geometry').set_crs('epsg:3857').to_crs('epsg:4326').centroid
+            ax.annotate(
+                f"N{idx}",
+                xy=(centroid.x, centroid.y),
+                xytext=(0, 0), textcoords="offset points",
+                ha='center', va='center', fontsize=8, color='white'
+            )
+
+            # Compute OR
+            owner_ds30_geom = ds30.geometry.iloc[0]       # D_i
+            neighbor_ds30_geom = ds30_n.geometry.iloc[0]  # D_j
+            
+            neighbor_parcel_geom = ds30_parcel_n.geometry.iloc[0] # t_j
+            owner_parcel_geom = ds30_parcel.geometry.iloc[0]      # t_i
+
+            # Whoever's LAND a hazard zone sits on owes the clearing, regardless
+            # of whose DS it is -- the DS just marks whose structure benefits.
+
+            # (D_i n t_j) \ D_j: owner's own DS sitting on the neighbor's parcel,
+            # outside the neighbor's own DS -- neighbor's land, so the neighbor owes it to the owner.
+            # YELLOW
+            intersection_i_tj = owner_ds30_geom.intersection(neighbor_parcel_geom)
+
+            if not intersection_i_tj.is_empty:
+                or_shape = intersection_i_tj.difference(neighbor_ds30_geom)
+
+                if not or_shape.is_empty:
+                    gpd.GeoDataFrame([1], geometry=[or_shape], crs='epsg:4326').plot(
+                        ax=ax, color='yellow', hatch='////', alpha=0.7, label=f"N{idx}'s OR on Owner{num}"
+                    )
+
+            # (D_j n t_i) \ D_i: neighbor's DS sitting on the owner's own parcel,
+            # outside the owner's own DS -- owner's land, so the owner owes it to the neighbor.
+            # BLUE
+            intersection_j_ti = neighbor_ds30_geom.intersection(owner_parcel_geom)
+
+            if not intersection_j_ti.is_empty:
+                or_shape_n = intersection_j_ti.difference(owner_ds30_geom)
+
+                if not or_shape_n.is_empty:
+                    gpd.GeoDataFrame([1], geometry=[or_shape_n], crs='epsg:4326').plot(
+                        ax=ax, color='royalblue', hatch='\\\\', alpha=0.7, label=f"Owner{num}'s OR on N{idx}"
+                    )
+
+        # Legend formatting
+        legend_elements = [
+            Patch(facecolor='gray', label="Building"),
+            Patch(facecolor='lightgray', alpha=0.5, edgecolor='k', linewidth=1, label="Parcel"),
+            Patch(facecolor='k', linewidth=2, label=rf"$h_{{{num}}}$"),
+            Patch(facecolor='red', alpha=0.5, edgecolor='k', linewidth=1, label=rf"$D_{{{num}}}$"),
+            Patch(facecolor='yellow', hatch='////', alpha=0.5, edgecolor='k', linewidth=1, label=r"$OR_{Neighbor}$"),    
+            Patch(facecolor='white', alpha=0.5, edgecolor='k', linewidth=1, linestyle='--', label=r"$D_{Neighbor}$"),        
+            Patch(facecolor='royalblue', hatch='\\\\', alpha=0.5, edgecolor='k', linewidth=1, label=rf"$OR_{{{num}}}$")
+        ]    
+        ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 0.9), loc='upper left', fontsize=16)
+        ax.set_xticklabels([]);ax.set_yticklabels([])
+        
+        if save:
+            plt.savefig(save, dpi=300, bbox_inches='tight')
+        
+        plt.show()
+
+        if one_example:
+            break
 
 def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_alpha=0.25,
                            node_size_factor=1.0, show_labels=True, highlight_node=None,
                            figsize=(12, 12), label_size=24, save=False):
     """
-    Draws every node on a circle (sorted by node id) with curved directed
-    edges, node color set by the average of each node's outgoing
-    `node_attribute` (e.g. SR or OR) edges, and node size set by degree.
-    If `highlight_node` is given, that node and every edge touching it are
-    drawn in red on top of everything else -- useful for illustrating one
-    owner's place in the network (Fig. 4C/5C-style).
+    Node color set by avg of each node's SR or OR links with node size scaled by degree
     """
     connected_nodes = set()
     for edge in G.edges():
@@ -1051,15 +1252,24 @@ def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_
     ax.set_aspect('equal')
     ax.axis('off')
 
-    # Node color: average of each node's outgoing node_attribute edge values
+    # Node color: avg each node's own-responsibility link values. For SR, the
+    # edge tail is already the node contributing its own-parcel share
+    # (build_network_v2 adds SR edges as (i, j, SR=SR_owner_ij)), so a node's
+    # OUTGOING edges are its own SR. For OR, edges point the opposite way --
+    # (k, i, OR=...) with the arrow TO whoever owes (build_network_v2) -- so
+    # a node's own OR (what it owes, matching OR_avg/Table 2/TR everywhere
+    # else) lives on its INCOMING edges; outgoing OR edges are what's owed
+    # TO it by others, not what it owes.
+    edge_view = G.in_edges if node_attribute == 'OR' else G.out_edges
+
     all_edge_attribute_values = [data[node_attribute] for u, v, data in G.edges(data=True) if node_attribute in data]
     min_edge_attr_val = min(all_edge_attribute_values) if all_edge_attribute_values else 0
     max_edge_attr_val = max(all_edge_attribute_values) if all_edge_attribute_values else 0
 
     node_color_attribute_values = []
     for node in nodes:
-        outgoing = [data[node_attribute] for u, v, data in G.out_edges(node, data=True) if node_attribute in data]
-        node_color_attribute_values.append(np.mean(outgoing) if outgoing else min_edge_attr_val)
+        own_edges = [data[node_attribute] for u, v, data in edge_view(node, data=True) if node_attribute in data]
+        node_color_attribute_values.append(np.mean(own_edges) if own_edges else min_edge_attr_val)
 
     if node_color_attribute_values and max_edge_attr_val > min_edge_attr_val:
         norm_node_color_values = [
@@ -1076,7 +1286,7 @@ def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_
 
     highlight_edges = [edge for edge in G.edges() if edge[0] == highlight_node or edge[1] == highlight_node]
 
-    # Draw edges as quadratic Bezier curves bowed toward the circle's center
+    # Plot network links
     for edge in G.edges():
         start_node, end_node = edge
         start_pos = positions[start_node]
@@ -1121,7 +1331,6 @@ def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_
                         arrowprops=dict(arrowstyle='->', color=edge_color, alpha=alpha, lw=line_width),
                         zorder=2 if is_highlight_edge else 1)
 
-    # Labels
     if show_labels:
         for node in nodes:
             pos = positions[node]
@@ -1135,7 +1344,6 @@ def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_
             else:
                 ax.text(label_x, label_y, str(node), fontsize=16, ha=ha, va=va)
 
-    # Nodes
     node_positions_x = [positions[node][0] for node in nodes]
     node_positions_y = [positions[node][1] for node in nodes]
     ax.scatter(node_positions_x, node_positions_y, s=300, c=node_colors, edgecolors='black', linewidths=2, zorder=5)
@@ -1148,7 +1356,7 @@ def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_
     if node_attribute and all_edge_attribute_values:
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=mcolors.Normalize(vmin=0, vmax=max_edge_attr_val))
         sm.set_array([])
-        cbar = plt.colorbar(sm, ax=ax, shrink=0.25, pad=-0.08)
+        cbar = plt.colorbar(sm, ax=ax, shrink=0.25, pad=-0.08, format=sigfig_formatter_compact)
         cbar.set_label(f'{node_attribute} [$ft^3/min$]', rotation=90, labelpad=15, size=label_size)
         cbar.ax.tick_params(labelsize=label_size)
 

@@ -72,8 +72,8 @@ def compute_SR(gdf, index, polygon, tax_polygon, plot, risk_src=None):
                     mean_risk_overlap_tax_neighbor = 1
 
                 indiv_overlap_areas.append(overlap.area)
-                overlaps_tax_owner.append(overlap_tax_owner.area * mean_risk_overlap_tax_owner)
-                overlaps_tax_neighbor.append(overlap_tax_neighbor.area * mean_risk_overlap_tax_neighbor)
+                overlaps_tax_owner.append(overlap_tax_owner.area * SQM_TO_SQFT * mean_risk_overlap_tax_owner)
+                overlaps_tax_neighbor.append(overlap_tax_neighbor.area * SQM_TO_SQFT * mean_risk_overlap_tax_neighbor)
                 overlap_ids.append(other_index)
                 indiv_overlap_polygons.append(overlap)
                 overlaps_tax_owner_polygons.append(overlap_tax_owner)
@@ -81,43 +81,43 @@ def compute_SR(gdf, index, polygon, tax_polygon, plot, risk_src=None):
 
                 count += 1
 
-        if count > 0:
-            overlapping_polygons_gdf = gpd.GeoDataFrame(geometry=indiv_overlap_polygons, columns=['geometry']).unary_union
-            overlap_proportion = 0
-            SR_owner = [_overlap / overlapping_polygons_gdf.area for _overlap in overlaps_tax_owner]
-            SR_neighbors = [_overlap / overlapping_polygons_gdf.area for _overlap in overlaps_tax_neighbor]
+    if count > 0:
+        overlapping_polygons_gdf = gpd.GeoDataFrame(geometry=indiv_overlap_polygons, columns=['geometry']).unary_union
+        overlap_proportion = 0
+        SR_owner = list(overlaps_tax_owner)
+        SR_neighbors = list(overlaps_tax_neighbor)
 
-            # PR must stay on the owner's own parcel
-            overlap_PR = polygon.intersection(tax_polygon).difference(overlapping_polygons_gdf)
+        # PR must stay on the owner's own parcel
+        overlap_PR = polygon.intersection(tax_polygon).difference(overlapping_polygons_gdf)
 
+        if risk_src:
+            risk_overlap_PR = clip_raster(overlap_PR, risk_src)
+            PR = np.mean(risk_overlap_PR) * overlap_PR.area * SQM_TO_SQFT if risk_overlap_PR is not None else 0
+        else:
+            PR = overlap_PR.area * SQM_TO_SQFT
+
+        if overlap_PR is None or overlap_PR == []:
+            overlap_PR = 0
+            PR = 0
+
+    elif count == 0:
+        overlap_proportion = 0
+        SR_owner = 0
+        SR_neighbors = 0
+
+        # No SR-overlapping neighbors
+        overlap_PR = polygon.intersection(tax_polygon)
+        if not overlap_PR.is_empty:
             if risk_src:
                 risk_overlap_PR = clip_raster(overlap_PR, risk_src)
-                PR = np.mean(risk_overlap_PR) * overlap_PR.area / polygon.area if risk_overlap_PR is not None else 0
+                PR = np.mean(risk_overlap_PR) * overlap_PR.area * SQM_TO_SQFT if risk_overlap_PR is not None else 0
             else:
-                PR = overlap_PR.area / polygon.area
+                PR = overlap_PR.area * SQM_TO_SQFT
+        else:
+            PR = 0
 
-            if overlap_PR is None or overlap_PR == []:
-                overlap_PR = 0
-                PR = 0
-
-        elif count == 0:
-            overlap_proportion = 0
-            SR_owner = 0
-            SR_neighbors = 0
-
-            # No SR-overlapping neighbors
-            overlap_PR = polygon.intersection(tax_polygon)
-            if not overlap_PR.is_empty:
-                if risk_src:
-                    risk_overlap_PR = clip_raster(overlap_PR, risk_src)
-                    PR = np.mean(risk_overlap_PR) * overlap_PR.area / polygon.area if risk_overlap_PR is not None else 0
-                else:
-                    PR = overlap_PR.area / polygon.area
-            else:
-                PR = 0
-
-        if PR == []:
-            PR = None
+    if PR == []:
+        PR = None
 
     return count, overlap_proportion, overlap_ids, indiv_overlap_areas, SR_owner, SR_neighbors, PR, overlaps_tax_owner_polygons, overlaps_tax_neighbor_polygons, other_polygons, other_tax_polygons
 
@@ -154,7 +154,7 @@ def compute_OR(gdf, index, polygon, tax_polygon, risk_src=None):
             if not overlap_in.is_empty:
                 mean_risk_in = _mean_risk(overlap_in)
                 owed_overlap_areas_in.append(overlap_in.area)
-                owed_overlap_proportion_in.append((overlap_in.area / tax_polygon.area) * mean_risk_in)
+                owed_overlap_proportion_in.append(overlap_in.area * SQM_TO_SQFT * mean_risk_in)
                 owed_ids_in.append(other_index)
                 owed_count_in += 1
 
@@ -166,7 +166,7 @@ def compute_OR(gdf, index, polygon, tax_polygon, risk_src=None):
                 if not overlap_out.is_empty:
                     mean_risk_out = _mean_risk(overlap_out)
                     owed_overlap_areas_out.append(overlap_out.area)
-                    owed_overlap_proportion_out.append((overlap_out.area / other_tax_polygon.area) * mean_risk_out)
+                    owed_overlap_proportion_out.append(overlap_out.area * SQM_TO_SQFT * mean_risk_out)
                     owed_ids_out.append(other_index)
                     owed_count_out += 1
 
@@ -313,11 +313,13 @@ def preprocess(base_path, buffer_distance=30, check=False, base_crs=BASE_CRS):
     bldgs = gpd.read_file(os.path.join(base_path, 'bldgs.shp')).to_crs(base_crs)
     parcels = gpd.read_file(os.path.join(base_path, 'parcels.shp')).to_crs(base_crs)
 
+    # check since some buildings or parcels are combined multipolygons that causes errors
     if any(isinstance(g['geometry'], MultiPolygon) for _, g in parcels.iterrows()):
         parcels = parcels.explode()
 
+    # Map buildings to parcels
     all_bldgs_tax = bldg_to_parcel(bldgs, parcels)
-    all_bldgs_tax['DS_30'] = all_bldgs_tax.geometry.buffer(buffer_distance / 3.281)  # ft to m
+    all_bldgs_tax['DS_30'] = all_bldgs_tax.geometry.buffer(buffer_distance / 3.281)  #TODO: Hardcoded conv
     all_bldgs_tax.rename(columns={'geometry': 'bldg_geometry', 'DS_30': 'geometry'}, inplace=True)
     all_bldgs_tax.geometry = all_bldgs_tax['geometry']
 
