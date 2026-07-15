@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Spatial Responsibility — Interactive Neighborhood Viewer</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="header-text">
+    <h1>Spatial Responsibility in Wildfire Risk Mitigation</h1>
+    <p class="subtitle">Interactive neighborhood viewer &mdash; Personal (PR), Shared (SR), and Owed (OR) responsibility</p>
+  </div>
+  <div class="header-links">
+    <button id="about-btn" class="header-btn">&#9432; About</button>
+    <a href="https://github.com/minhokim93/spatial-responsibility" target="_blank" rel="noopener" class="header-btn">GitHub &#8599;</a>
+  </div>
+</header>
+
+<div id="about-modal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <button id="about-close" class="popup-close" aria-label="Close">&times;</button>
+    <h2>About this viewer</h2>
+    <p>This tool visualizes three spatial responsibility metrics for wildfire defensible-space mitigation in a single wildland-urban-interface neighborhood:</p>
+    <ul>
+      <li><b class="pr-label">PR &mdash; Personal Responsibility</b>: the part of a homeowner's own defensible space that lies on their own parcel and doesn't overlap any neighbor's defensible space.</li>
+      <li><b class="sr-label">SR &mdash; Shared Responsibility</b>: area where two neighbors' defensible space buffers overlap, attributed to whichever parcel the overlap physically sits on.</li>
+      <li><b class="or-label">OR &mdash; Owed Responsibility</b>: area on a homeowner's own parcel that is only reachable by a neighbor's defensible space buffer (not their own) &mdash; mitigation the homeowner owes because a neighbor's buffer happens to reach their land. Directed edges point toward whoever owes.</li>
+    </ul>
+    <p>Each metric is reported both as raw geometric <b>area [ft&sup2;]</b> and as area-weighted <b>responsibility [ft&sup3;/min]</b> (area &times; mean wildfire hazard).</p>
+    <p><b>How to use it:</b></p>
+    <ul>
+      <li><b>View</b>: switch between the full GIS map (parcels, buildings, defensible-space buffers, PR/SR/OR region shapes) and a simplified network graph.</li>
+      <li><b>Active network</b>: choose SR or OR &mdash; controls both which directed links are drawn and which network the mitigation simulation runs on.</li>
+      <li><b>Choropleth layers</b>: toggle PR/SR/OR region shading on or off independently, and switch between area and responsibility units.</li>
+      <li>Click any building or node to see its stats and highlight its SR/OR connections.</li>
+      <li><b>Mitigation simulation</b>: pick a strategy (random, localized, targeted) and drag the slider to progressively remove links, tracking remaining total responsibility and active sub-networks.</li>
+    </ul>
+    <p class="citation">Kim, M., Raine, H., Radke, J., &amp; Gonz&aacute;lez, M. C. <i>A Network Approach to Mapping Responsibility in Wildfire Risk Mitigation.</i></p>
+  </div>
+</div>
+
+<main>
+  <section id="map-panel">
+    <svg id="map" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet">
+      <!-- Bottom -> top paint order: base GIS, then region fills, then
+           buildings/nodes, then links ON TOP of nodes (arrowheads drawn as
+           small triangles at each arc's midpoint, not SVG markers, so they
+           can be positioned mid-curve), then the click highlight (always
+           topmost), then optional house-number labels. -->
+      <g id="layer-parcels"></g>
+      <g id="layer-ds"></g>
+      <g id="layer-regions"></g>
+      <g id="layer-buildings"></g>
+      <g id="layer-network-nodes"></g>
+      <g id="layer-sr-links"></g>
+      <g id="layer-or-links"></g>
+      <g id="layer-highlight-links"></g>
+      <g id="layer-labels"></g>
+    </svg>
+
+    <div id="selection-popup" class="hidden">
+      <button id="clear-selection" class="popup-close" aria-label="Close">&times;</button>
+      <div class="sel-id">House <span id="sel-id"></span></div>
+      <table class="stat-table">
+        <thead><tr><th></th><th>Area [ft&sup2;]</th><th>Resp. [ft&sup3;/min]</th></tr></thead>
+        <tbody>
+          <tr><td class="pr-label">PR</td><td id="sel-pr-area"></td><td id="sel-pr-resp"></td></tr>
+          <tr><td class="sr-label">SR</td><td id="sel-sr-area"></td><td id="sel-sr-resp"></td></tr>
+          <tr><td class="or-label">OR</td><td id="sel-or-area"></td><td id="sel-or-resp"></td></tr>
+        </tbody>
+      </table>
+      <div class="conn-summary">
+        <div><span class="swatch" style="background:#d1495b"></span> SR: <span id="sel-sr-in">0</span> in / <span id="sel-sr-out">0</span> out</div>
+        <div><span class="swatch" style="background:#2b6cb0"></span> OR: <span id="sel-or-in">0</span> owed to / <span id="sel-or-out">0</span> owed by</div>
+      </div>
+      <button id="clear-selection-btn" class="clear-btn">Clear selection</button>
+    </div>
+
+    <div id="legend"></div>
+    <div id="tooltip" class="hidden"></div>
+  </section>
+
+  <aside id="sidebar">
+
+    <div class="panel">
+      <h2>Display mode</h2>
+      <p class="hint">Map shows the GIS layers and PR/SR/OR regions. Network simplifies to nodes (sized/colored by PR) and edges only.</p>
+      <div class="pill-row" data-group="view-mode">
+        <button class="pill view-pill" data-view="network" style="--pill-color:#333">Network graph</button>
+        <button class="pill view-pill active" data-view="map" style="--pill-color:#333">Map</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Network selection</h2>
+      <p class="hint">Which directed network is drawn on the map, and which one the mitigation simulation below runs on &mdash; kept in sync so the two can't disagree.</p>
+      <div class="pill-row" data-group="active-network">
+        <button class="pill network-pill" data-network="SR" style="--pill-color:#d1495b">SR (Shared)</button>
+        <button class="pill network-pill" data-network="OR" style="--pill-color:#2b6cb0">OR (Owed)</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Map coloring</h2>
+      <p class="hint">Colors the actual PR/SR/OR regions (Map mode only). Toggle any combination on at once.</p>
+      <div class="row-label">Metric</div>
+      <div class="pill-row" data-group="choropleth-mode">
+        <button class="pill mode-pill active" data-mode="resp" style="--pill-color:#333">Responsibility [ft&sup3;/min]</button>
+        <button class="pill mode-pill" data-mode="area" style="--pill-color:#333">Area [ft&sup2;]</button>
+      </div>
+      <div class="row-label">Layers</div>
+      <label class="toggle"><input type="checkbox" class="layer-toggle" data-layer="PR" checked><span class="swatch" style="background:#2e7d52"></span> PR</label>
+      <label class="toggle"><input type="checkbox" class="layer-toggle" data-layer="SR" checked><span class="swatch" style="background:#c1440e"></span> SR</label>
+      <label class="toggle"><input type="checkbox" class="layer-toggle" data-layer="OR" checked><span class="swatch" style="background:#2b6cb0"></span> OR</label>
+    </div>
+
+    <div class="panel">
+      <h2>Background layers</h2>
+      <label class="toggle"><input type="checkbox" id="toggle-parcels" checked> Parcels</label>
+      <label class="toggle"><input type="checkbox" id="toggle-buildings" checked> Building footprints</label>
+      <label class="toggle"><input type="checkbox" id="toggle-ds" checked> Defensible space buffers</label>
+      <label class="toggle"><input type="checkbox" id="toggle-labels" checked> House numbers</label>
+    </div>
+
+    <div class="panel">
+      <h2>Mitigation simulation</h2>
+      <p class="hint">Simulating the <b><span id="sim-network-label">SR</span></b> network (set via "Network selection" above). Removes links under three strategies and tracks remaining total responsibility.</p>
+      <div class="row-label">Strategy</div>
+      <div class="pill-row" data-group="sim-strategy">
+        <button class="pill sim-pill" data-strategy="random" style="--pill-color:#555">Random</button>
+        <button class="pill sim-pill" data-strategy="localized" style="--pill-color:#555">Localized</button>
+        <button class="pill sim-pill" data-strategy="targeted" style="--pill-color:#555">Targeted</button>
+      </div>
+
+      <div class="slider-row">
+        <input type="range" id="sim-slider" min="0" max="100" value="0" step="1">
+        <span id="sim-slider-label">0%</span>
+      </div>
+      <div class="sim-buttons">
+        <button id="sim-play">&#9654; Play</button>
+        <button id="sim-reset">&#8635; Reset</button>
+      </div>
+      <div class="sim-stats">
+        <div>Links removed: <span id="sim-links-removed">0</span> / <span id="sim-links-total">0</span></div>
+        <div>Remaining total: <span id="sim-remaining-pct">100.0%</span></div>
+        <div>Active sub-networks: <span id="sim-active-subnets">0</span></div>
+      </div>
+    </div>
+
+  </aside>
+</main>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
