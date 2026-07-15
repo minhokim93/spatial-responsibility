@@ -268,7 +268,7 @@ def percolate(G_test=None, variable=None, probability_step=0.1, mode=0, interval
     return_details: if True, also returns the full per-step subnetwork DataFrame (with subnetwork_nodes)
     """
     rng = rng or random
-    state = {}  # persists across this run's percolate_graph calls
+    state = {} 
 
     directed = isinstance(G_test, networkx.classes.digraph.DiGraph)
 
@@ -276,7 +276,7 @@ def percolate(G_test=None, variable=None, probability_step=0.1, mode=0, interval
     sub_risk = []
     sub_avg_risk = []
     num_connected_components = []
-    sub_dfs = []  # full per-step subnetwork DataFrame (incl. subnetwork_nodes) --> kept only if return_details
+    sub_dfs = [] 
 
     percolated_graph = percolate_graph(G_test.copy(), removal_probability=None, variable=variable,
                                         mode=mode, num_sample=0, rng=rng, state=state)
@@ -284,7 +284,7 @@ def percolate(G_test=None, variable=None, probability_step=0.1, mode=0, interval
     if fraction_threshold:
         threshold = fraction_threshold * (len(G_test.edges(data=variable)))
     else:
-        threshold = len(G_test.edges(data=variable))  # percolate all edges
+        threshold = len(G_test.edges(data=variable))
 
     n_total_edges = len(G_test.edges(data=variable))
 
@@ -353,10 +353,8 @@ def run_percolation_trials(G_pre=None, variable=None, num_trials=None, step=None
     return subnetwork_dict
 
 
-# ---------------------------------------------------------------------------
-# 3. Subnetwork lineage tracking (birth/death/split/merge) 
-# ---------------------------------------------------------------------------
 
+# Track SR or OR by subnetwork
 def assign_lineage(prev_node_map, current_components, next_new_id):
     """
     Matches each current connected component to the subnetwork ID it descended from

@@ -43,9 +43,9 @@ def plot_summary(
     or_max: Optional[float] = None,
     save: Optional[str] = None,
     histogram_height_ratio: float = 0.5,
-    histogram_width_ratio: float = 1.0, # Kept for consistency, though currently 1.0
-    FIGURE_WIDTH: float = 15, # Using your specified default
-    FIGURE_HEIGHT: float = 5,  # Using your specified default
+    histogram_width_ratio: float = 1.0, 
+    FIGURE_WIDTH: float = 15, 
+    FIGURE_HEIGHT: float = 5, 
     LABEL_SIZE=15
 ) -> None:
     
@@ -110,7 +110,7 @@ def plot_summary(
         # ax[i].set_xlim(minx, maxx)
         # ax[i].set_ylim(miny, maxy)
 
-        # Overlays: Plot buildings, destroyed, spared
+        #TODO Overlays: Plot buildings, destroyed, spared
         # Check if bldgs is not empty before attempting to plot its bounds
         if bldgs is not None and not bldgs.empty:
             bldgs.plot(ax=ax[i], color='none', edgecolor='k', linewidth=0.5)
@@ -346,7 +346,7 @@ def plot_network(
     node_size=200,
     font_size=10,
     label_size=14,
-    cbar_pad=-0.075, # For colorbar
+    cbar_pad=-0.075,
     site=None,
     arrowsize=15,
     ds=None,
@@ -396,8 +396,8 @@ def plot_network(
         cmap=cmap_TR,
         node_color=list(node_TR.values()),
         alpha=0.8,
-        edgecolors='black', # Ensure node borders are black
-        linewidths=1.5,    # Increased from 1 to make borders more visible
+        edgecolors='black', 
+        linewidths=1.5,    
         vmin=node_vmin,
         vmax=node_vmax
     )
@@ -440,10 +440,10 @@ def plot_network(
     )
     sm_TR.set_array([])
     cbar_ax1 = inset_axes(ax,
-                          width="18%",    # Width of colorbar
-                          height="2%",    # Height of colorbar
+                          width="18%",    
+                          height="2%",    
                           loc='lower right',
-                          bbox_to_anchor=(-0.035, 0.25, 1, 1),  # (x0, y0, width, height) in axes coordinates
+                          bbox_to_anchor=(-0.035, 0.25, 1, 1),  
                           bbox_transform=ax.transAxes,
                           borderpad=0)
 
@@ -467,10 +467,10 @@ def plot_network(
 
     # Colorbar formatting with sigfig
     cbar_ax2 = inset_axes(ax,
-                          width="18%",    # Width of colorbar
-                          height="2%",    # Height of colorbar
+                          width="18%",   
+                          height="2%",   
                           loc='lower right',
-                          bbox_to_anchor=(-0.035, 0.12, 1, 1),  # Lower position
+                          bbox_to_anchor=(-0.035, 0.12, 1, 1),  
                           bbox_transform=ax.transAxes,
                           borderpad=0)
 
@@ -817,9 +817,7 @@ def plot_subnetwork_heatmaps(results, variable_label='SR', cmap='YlOrRd', figsiz
 
 
 def plot_total_risk_curve_aggregated(long_df, variable_label, figsize=(8, 6), label_size=16):
-    """
-    Plot total network responsibility vs. fraction of links removed based on multiple seed runs
-    """
+
     colors = {'Random': 'r', 'Localized': 'b', 'Targeted': 'g'}
     markers = {'Random': 'o', 'Localized': '^', 'Targeted': 's'}
     risk_col = f'total_{variable_label.lower()}'
@@ -834,6 +832,7 @@ def plot_total_risk_curve_aggregated(long_df, variable_label, figsize=(8, 6), la
 
     ax.yaxis.set_tick_params(labelsize=label_size)
     ax.xaxis.set_tick_params(labelsize=label_size)
+    ax.yaxis.set_major_formatter(sigfig_formatter_compact)  
     ax.set_ylabel(f'<Total {variable_label}> [$ft^3/min$]', size=label_size)
     ax.set_xlabel('Fraction of links removed', size=label_size)
     ax.legend(fontsize=label_size - 2)
@@ -1179,12 +1178,7 @@ def plot_OR_example(gdf_results, number=None, one_example=True, save=False):
             neighbor_parcel_geom = ds30_parcel_n.geometry.iloc[0] # t_j
             owner_parcel_geom = ds30_parcel.geometry.iloc[0]      # t_i
 
-            # Whoever's LAND a hazard zone sits on owes the clearing, regardless
-            # of whose DS it is -- the DS just marks whose structure benefits.
-
-            # (D_i n t_j) \ D_j: owner's own DS sitting on the neighbor's parcel,
-            # outside the neighbor's own DS -- neighbor's land, so the neighbor owes it to the owner.
-            # YELLOW
+            # Whoever's propoerty risk lies on owes the mitigation
             intersection_i_tj = owner_ds30_geom.intersection(neighbor_parcel_geom)
 
             if not intersection_i_tj.is_empty:
@@ -1195,9 +1189,7 @@ def plot_OR_example(gdf_results, number=None, one_example=True, save=False):
                         ax=ax, color='yellow', hatch='////', alpha=0.7, label=f"N{idx}'s OR on Owner{num}"
                     )
 
-            # (D_j n t_i) \ D_i: neighbor's DS sitting on the owner's own parcel,
-            # outside the owner's own DS -- owner's land, so the owner owes it to the neighbor.
-            # BLUE
+            # (D_j n t_i) \ D_i: neighbor's DS on owner's own parcel but outside DS (Owner owes neighbor)
             intersection_j_ti = neighbor_ds30_geom.intersection(owner_parcel_geom)
 
             if not intersection_j_ti.is_empty:
@@ -1252,14 +1244,6 @@ def plot_network_circular(G, node_attribute='SR', node_color_map='gray_r', edge_
     ax.set_aspect('equal')
     ax.axis('off')
 
-    # Node color: avg each node's own-responsibility link values. For SR, the
-    # edge tail is already the node contributing its own-parcel share
-    # (build_network_v2 adds SR edges as (i, j, SR=SR_owner_ij)), so a node's
-    # OUTGOING edges are its own SR. For OR, edges point the opposite way --
-    # (k, i, OR=...) with the arrow TO whoever owes (build_network_v2) -- so
-    # a node's own OR (what it owes, matching OR_avg/Table 2/TR everywhere
-    # else) lives on its INCOMING edges; outgoing OR edges are what's owed
-    # TO it by others, not what it owes.
     edge_view = G.in_edges if node_attribute == 'OR' else G.out_edges
 
     all_edge_attribute_values = [data[node_attribute] for u, v, data in G.edges(data=True) if node_attribute in data]

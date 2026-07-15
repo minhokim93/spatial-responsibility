@@ -81,6 +81,13 @@ def compute_SR(gdf, index, polygon, tax_polygon, plot, risk_src=None):
 
                 count += 1
 
+    # PR_area is the raw geometric area of the PR region [ft^2], with no risk
+    # weighting -- independent of whether a risk raster is supplied, unlike
+    # PR itself (Area x mean_risk, [ft^3/min]). Used for the area-only
+    # network figures (weight_by='area'), where edges are already unweighted
+    # by risk and the node color should stay in the same units [ft^2].
+    PR_area = 0
+
     if count > 0:
         overlapping_polygons_gdf = gpd.GeoDataFrame(geometry=indiv_overlap_polygons, columns=['geometry']).unary_union
         overlap_proportion = 0
@@ -89,6 +96,7 @@ def compute_SR(gdf, index, polygon, tax_polygon, plot, risk_src=None):
 
         # PR must stay on the owner's own parcel
         overlap_PR = polygon.intersection(tax_polygon).difference(overlapping_polygons_gdf)
+        PR_area = overlap_PR.area * SQM_TO_SQFT if not overlap_PR.is_empty else 0
 
         if risk_src:
             risk_overlap_PR = clip_raster(overlap_PR, risk_src)
@@ -108,6 +116,7 @@ def compute_SR(gdf, index, polygon, tax_polygon, plot, risk_src=None):
         # No SR-overlapping neighbors
         overlap_PR = polygon.intersection(tax_polygon)
         if not overlap_PR.is_empty:
+            PR_area = overlap_PR.area * SQM_TO_SQFT
             if risk_src:
                 risk_overlap_PR = clip_raster(overlap_PR, risk_src)
                 PR = np.mean(risk_overlap_PR) * overlap_PR.area * SQM_TO_SQFT if risk_overlap_PR is not None else 0
@@ -119,7 +128,7 @@ def compute_SR(gdf, index, polygon, tax_polygon, plot, risk_src=None):
     if PR == []:
         PR = None
 
-    return count, overlap_proportion, overlap_ids, indiv_overlap_areas, SR_owner, SR_neighbors, PR, overlaps_tax_owner_polygons, overlaps_tax_neighbor_polygons, other_polygons, other_tax_polygons
+    return count, overlap_proportion, overlap_ids, indiv_overlap_areas, SR_owner, SR_neighbors, PR, PR_area, overlaps_tax_owner_polygons, overlaps_tax_neighbor_polygons, other_polygons, other_tax_polygons
 
 
 def compute_OR(gdf, index, polygon, tax_polygon, risk_src=None):
@@ -196,7 +205,7 @@ def compute_responsibility(gdf, risk=None, plot=False):
         'count': [], 'owed_count': [], 'owed_ID': [],
         'SR_indiv': [], 'SR_avg': [], 'SR_ID': [], 'SR_area': [], 'SR_area_avg': [],
         'SR_owner': [], 'SR_owner_avg': [], 'SR_neighbors': [], 'SR_neighbors_avg': [],
-        'PR': [],
+        'PR': [], 'PR_area': [],
         'OR': [], 'OR_avg': [],
         'owed_overlap_area': [], 'owed_overlap_area_indiv': [],
         'owed_count_out': [], 'owed_ID_out': [],
@@ -210,7 +219,7 @@ def compute_responsibility(gdf, risk=None, plot=False):
         polygon = row['geometry']          # DS30
         tax_polygon = row['tax_geometry']  # tax parcel
 
-        count, overlap_proportion, overlap_ids, indiv_overlap_areas, SR_owner, SR_neighbors, PR, owner_polys, neighbor_polys, other_polygons, other_tax_polygons = compute_SR(
+        count, overlap_proportion, overlap_ids, indiv_overlap_areas, SR_owner, SR_neighbors, PR, PR_area, owner_polys, neighbor_polys, other_polygons, other_tax_polygons = compute_SR(
             gdf, index, polygon, tax_polygon, plot, risk_src)
         (owed_count, owed_ids, owed_overlap_proportion, owed_overlap_areas, owed_polygons_area_indiv,
          owed_count_out, owed_ids_out, owed_overlap_proportion_out, owed_overlap_areas_out, owed_polygons_area_indiv_out) = compute_OR(
@@ -228,6 +237,7 @@ def compute_responsibility(gdf, risk=None, plot=False):
         results['SR_neighbors_avg'].append(np.nanmean(SR_neighbors))
 
         results['PR'].append(PR)
+        results['PR_area'].append(PR_area)
 
         results['owed_count'].append(owed_count)
         results['owed_ID'].append(owed_ids)
