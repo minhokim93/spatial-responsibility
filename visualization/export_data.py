@@ -44,7 +44,20 @@ all_bldgs_tax = all_bldgs_tax.set_geometry('geometry')
 
 all_bldgs_tax_grouped = group_bldgs_by_parcel(all_bldgs_tax).reset_index(drop=True)
 
-print(f"Buildings: {len(all_bldgs_tax_grouped)}")
+print(f"Raw buildings: {len(all_bldgs_tax)}  ->  network nodes (one per parcel): {len(all_bldgs_tax_grouped)}")
+
+# group_bldgs_by_parcel collapses parcels with >1 structure (house + ADU/
+# garage/etc.) into a single node, since PR/SR/OR and the network model one
+# property as one node -- that's correct and matches the paper. But it means
+# a handful of individual building footprints (5 parcels x 2 buildings here)
+# would otherwise never get drawn on the map at all. Recover the mapping
+# from each RAW building to the node it belongs to (same groupby order
+# group_bldgs_by_parcel itself uses, so the ids line up with gdf_results'
+# row order) so the app can render all raw footprints individually while
+# still routing clicks/selection to the shared underlying node.
+parcel_idx_to_node_id = {parcel_idx: node_id for node_id, (parcel_idx, _) in enumerate(all_bldgs_tax.groupby('parcel_idx'))}
+assert len(parcel_idx_to_node_id) == len(all_bldgs_tax_grouped)
+all_bldgs_tax['node_id'] = all_bldgs_tax['parcel_idx'].map(parcel_idx_to_node_id)
 
 # ---------------------------------------------------------------------------
 # 2. Responsibility metrics, using the same ROS raster as the paper.
@@ -243,8 +256,27 @@ for i in range(n):
         'OR_area': round(float(row['OR_area_total']), 2),
     })
 
+# Every raw (pre-grouping) building footprint, individually, tagged with
+# the network node it belongs to -- so all 70 structures are drawn on the
+# map even though 5 pairs share a single node (and therefore a single set
+# of PR/SR/OR values and click behavior). building_id (0..69) is a distinct
+# per-structure number, deliberately separate from node_id (0..64, one per
+# parcel) -- the two only coincide for the 60 parcels with a single
+# structure; for the 5 merged parcels, two different building_ids map to
+# the same node_id.
+raw_buildings = []
+for building_id, (_, row) in enumerate(all_bldgs_tax.iterrows()):
+    c = row['bldg_geometry'].centroid
+    raw_buildings.append({
+        'building_id': int(building_id),
+        'node_id': int(row['node_id']),
+        'centroid': [round(c.x, 2), round(c.y, 2)],
+        'building': polygon_rings(row['bldg_geometry']),
+    })
+
 out = {
     'nodes': nodes,
+    'raw_buildings': raw_buildings,
     'edges': {'SR': sr_edges, 'OR': or_edges},
     'removal_order': networks_order,
 }

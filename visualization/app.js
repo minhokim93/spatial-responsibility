@@ -133,17 +133,24 @@
     }
   }
 
+  // node id -> array of building-footprint <path>s. An array (not a single
+  // path) because 5 parcels in this study site have two structures on them
+  // (house + ADU/garage) that share one network node -- group_bldgs_by_parcel
+  // correctly merges them into one PR/SR/OR value, but both raw footprints
+  // still need to be drawn and both need to highlight/select together.
   const buildingPathById = new Map();
 
   function renderBuildings() {
-    for (const n of NODES) {
-      if (!n.building.length) continue;
-      const path = el('path', { d: ringsToPath(n.building), class: 'building-shape', 'data-id': n.id });
-      path.addEventListener('click', () => onBuildingClick(n.id));
-      path.addEventListener('mousemove', (ev) => showTooltip(ev, n));
+    for (const b of DATA.raw_buildings) {
+      if (!b.building.length) continue;
+      const n = NODE_BY_ID.get(b.node_id);
+      const path = el('path', { d: ringsToPath(b.building), class: 'building-shape', 'data-id': b.node_id });
+      path.addEventListener('click', () => onBuildingClick(b.node_id));
+      path.addEventListener('mousemove', (ev) => showTooltip(ev, n, b.building_id));
       path.addEventListener('mouseleave', hideTooltip);
       layers.buildings.appendChild(path);
-      buildingPathById.set(n.id, path);
+      if (!buildingPathById.has(b.node_id)) buildingPathById.set(b.node_id, []);
+      buildingPathById.get(b.node_id).push(path);
     }
   }
 
@@ -176,11 +183,17 @@
   }
 
   // House-number annotations, drawn in the topmost layer so they're always
-  // legible over regions/buildings/nodes/links regardless of view mode.
-  function renderLabels() {
+  // legible over regions/buildings/nodes/links. Two separate label sets --
+  // node labels (65, network-node ids) for Network view, building labels
+  // (70, per-structure ids, distinct from node id whenever a parcel has two
+  // structures) for Map view -- see setViewMode for which is shown when.
+  const layerNodeLabels = document.getElementById('layer-node-labels');
+  const layerBuildingLabels = document.getElementById('layer-building-labels');
+
+  function renderNodeLabels() {
     for (const n of NODES) {
       const [cx, cy] = proj(n.centroid);
-      layers.labels.appendChild(el('text', {
+      layerNodeLabels.appendChild(el('text', {
         x: cx.toFixed(2), y: cy.toFixed(2),
         class: 'house-label', 'data-id': n.id,
         'text-anchor': 'middle', 'dominant-baseline': 'central',
@@ -188,11 +201,28 @@
     }
   }
 
-  function showTooltip(ev, n) {
+  function renderBuildingLabels() {
+    for (const b of DATA.raw_buildings) {
+      const [cx, cy] = proj(b.centroid);
+      layerBuildingLabels.appendChild(el('text', {
+        x: cx.toFixed(2), y: cy.toFixed(2),
+        class: 'house-label', 'data-id': b.building_id,
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+      })).textContent = b.building_id;
+    }
+  }
+
+  // buildingId is only passed when hovering an individual raw footprint
+  // (Map view); it's shown alongside the node/house id whenever the two
+  // differ, i.e. one of the 5 parcels with two structures sharing a node.
+  function showTooltip(ev, n, buildingId) {
     tooltip.classList.remove('hidden');
     tooltip.style.left = ev.offsetX + 14 + 'px';
     tooltip.style.top = ev.offsetY + 10 + 'px';
-    tooltip.innerHTML = `<b>House ${n.id}</b><br>PR ${fmt(n.PR_resp)} ft&sup3;/min<br>SR ${fmt(n.SR_resp)} ft&sup3;/min<br>OR ${fmt(n.OR_resp)} ft&sup3;/min`;
+    const heading = (buildingId !== undefined && buildingId !== n.id)
+      ? `Building ${buildingId} (House ${n.id})`
+      : `House ${n.id}`;
+    tooltip.innerHTML = `<b>${heading}</b><br>PR ${fmt(n.PR_resp)} ft&sup3;/min<br>SR ${fmt(n.SR_resp)} ft&sup3;/min<br>OR ${fmt(n.OR_resp)} ft&sup3;/min`;
   }
   function hideTooltip() { tooltip.classList.add('hidden'); }
 
@@ -343,7 +373,7 @@
   }
 
   function renderSelection() {
-    for (const [, path] of buildingPathById) path.classList.remove('selected', 'neighbor');
+    for (const [, paths] of buildingPathById) paths.forEach((p) => p.classList.remove('selected', 'neighbor'));
     for (const [, circle] of networkNodeById) circle.classList.remove('selected', 'neighbor');
     layers.highlight.innerHTML = '';
 
@@ -354,7 +384,7 @@
     popup.classList.remove('hidden');
 
     const n = NODE_BY_ID.get(selectedId);
-    buildingPathById.get(selectedId).classList.add('selected');
+    (buildingPathById.get(selectedId) || []).forEach((p) => p.classList.add('selected'));
     if (networkNodeById.get(selectedId)) networkNodeById.get(selectedId).classList.add('selected');
 
     document.getElementById('sel-id').textContent = selectedId;
@@ -384,8 +414,7 @@
       neighborIds.add(e.source === selectedId ? e.target : e.source);
     }
     for (const nid of neighborIds) {
-      const p = buildingPathById.get(nid);
-      if (p) p.classList.add('neighbor');
+      (buildingPathById.get(nid) || []).forEach((p) => p.classList.add('neighbor'));
       const c = networkNodeById.get(nid);
       if (c) c.classList.add('neighbor');
     }
@@ -533,6 +562,26 @@
   // Wire up UI
   // ------------------------------------------------------------------
   let viewMode = 'map';
+  let labelMode = 'building'; // 'building' (per-structure, Map view only) | 'node' (per-property)
+
+  // Network view only has 65 circles (one per node) to label, so it always
+  // shows house/node numbers regardless of labelMode; Map view -- which has
+  // all 70 individual footprints -- respects the building/house choice.
+  function applyLabelVisibility() {
+    if (viewMode === 'network') {
+      layerNodeLabels.style.display = '';
+      layerBuildingLabels.style.display = 'none';
+    } else {
+      layerNodeLabels.style.display = labelMode === 'node' ? '' : 'none';
+      layerBuildingLabels.style.display = labelMode === 'building' ? '' : 'none';
+    }
+  }
+
+  function setLabelMode(mode) {
+    labelMode = mode;
+    document.querySelectorAll('.label-mode-pill').forEach((b) => b.classList.toggle('active', b.dataset.labelMode === mode));
+    applyLabelVisibility();
+  }
 
   function applyGisLayerVisibility() {
     if (viewMode !== 'map') return;
@@ -547,6 +596,9 @@
     document.getElementById('toggle-ds').addEventListener('change', applyGisLayerVisibility);
     document.getElementById('toggle-labels').addEventListener('change', (e) => {
       layers.labels.style.display = e.target.checked ? '' : 'none';
+    });
+    document.querySelectorAll('.label-mode-pill').forEach((b) => {
+      b.addEventListener('click', () => setLabelMode(b.dataset.labelMode));
     });
   }
 
@@ -567,6 +619,7 @@
       layers.regions.style.display = '';
       applyGisLayerVisibility();
     }
+    applyLabelVisibility();
   }
 
   function initViewModePills() {
@@ -760,7 +813,8 @@
     renderLinks('OR', layers.orLinks, 'or');
     renderBuildings();
     renderNetworkNodes();
-    renderLabels();
+    renderNodeLabels();
+    renderBuildingLabels();
     renderChoropleth();
     initLayerToggles();
     initChoroplethControls();

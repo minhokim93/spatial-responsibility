@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Spatial Responsibility — Interactive Neighborhood Viewer</title>
+<title>Spatial Responsibility — Interactive Viewer (Beta)</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header>
   <div class="header-text">
     <h1>Spatial Responsibility in Wildfire Risk Mitigation</h1>
-    <p class="subtitle">Interactive neighborhood viewer &mdash; Personal (PR), Shared (SR), and Owed (OR) responsibility</p>
+    <p class="subtitle">Interactive Viewer (Beta) &mdash; Personal, Shared, and Owed Responsibility</p>
   </div>
   <div class="header-links">
     <button id="about-btn" class="header-btn">&#9432; About</button>
@@ -22,18 +22,18 @@
   <div class="modal-card">
     <button id="about-close" class="popup-close" aria-label="Close">&times;</button>
     <h2>About this viewer</h2>
-    <p>This tool visualizes three spatial responsibility metrics for wildfire defensible-space mitigation in a single wildland-urban-interface neighborhood:</p>
+    <p>This tool visualizes spatial responsibility metrics for wildfire defensible space mitigation in a demonstration neighborhood. We assume defensible spaces can overlap property boundaries as 30-ft buffers (Zones 0 and 1 combined). We also use rate of spread (ROS) as a proxy of wildfire hazard to calculate responsibility values in our study. To note however, the responsibility metric is agnostic to the metric. Users can apply other risk metrics of their choice:</p>
     <ul>
-      <li><b class="pr-label">PR &mdash; Personal Responsibility</b>: the part of a homeowner's own defensible space that lies on their own parcel and doesn't overlap any neighbor's defensible space.</li>
-      <li><b class="sr-label">SR &mdash; Shared Responsibility</b>: area where two neighbors' defensible space buffers overlap, attributed to whichever parcel the overlap physically sits on.</li>
-      <li><b class="or-label">OR &mdash; Owed Responsibility</b>: area on a homeowner's own parcel that is only reachable by a neighbor's defensible space buffer (not their own) &mdash; mitigation the homeowner owes because a neighbor's buffer happens to reach their land. Directed edges point toward whoever owes.</li>
+      <li><b class="pr-label">PR &mdash; Personal Responsibility</b>: Region of homeowner's own defensible space that lies on their own parcel and doesn't overlap any neighbor's defensible space.</li>
+      <li><b class="sr-label">SR &mdash; Shared Responsibility</b>: Region where two neighbors' defensible space buffers overlap, attributed to whichever parcel the overlap lies on.</li>
+      <li><b class="or-label">OR &mdash; Owed Responsibility</b>: Region where homeowner's defensible space overlaps with neighbor's parcel, but not their defensible space (Directed links point toward whoever owes).</li>
     </ul>
-    <p>Each metric is reported both as raw geometric <b>area [ft&sup2;]</b> and as area-weighted <b>responsibility [ft&sup3;/min]</b> (area &times; mean wildfire hazard).</p>
+    <p>Each metric is reported both as <b>area [ft&sup2;]</b> and as area-weighted <b>responsibility [ft&sup3;/min]</b> (area &times; mean wildfire hazard).</p>
     <p><b>How to use it:</b></p>
     <ul>
-      <li><b>View</b>: switch between the full GIS map (parcels, buildings, defensible-space buffers, PR/SR/OR region shapes) and a simplified network graph.</li>
+      <li><b>View</b>: switch between the full neighborhood map (parcels, buildings, defensible-space buffers, PR/SR/OR region shapes) and a simplified directed network.</li>
       <li><b>Active network</b>: choose SR or OR &mdash; controls both which directed links are drawn and which network the mitigation simulation runs on.</li>
-      <li><b>Choropleth layers</b>: toggle PR/SR/OR region shading on or off independently, and switch between area and responsibility units.</li>
+      <li><b>Spatial responsibility</b>: toggle PR/SR/OR region shading on or off independently, and switch between area and responsibility units.</li>
       <li>Click any building or node to see its stats and highlight its SR/OR connections.</li>
       <li><b>Mitigation simulation</b>: pick a strategy (random, localized, targeted) and drag the slider to progressively remove links, tracking remaining total responsibility and active sub-networks.</li>
     </ul>
@@ -61,7 +61,15 @@
         <g id="layer-sr-links"></g>
         <g id="layer-or-links"></g>
         <g id="layer-highlight-links"></g>
-        <g id="layer-labels"></g>
+        <g id="layer-labels">
+          <!-- Two separate label sets, only one shown at a time: node labels
+               (65, one per network node -- correct for Network view, where
+               only 65 circles exist) and building labels (70, one per raw
+               footprint -- correct for Map view, where all 70 structures are
+               drawn and a shared node's two buildings need distinct numbers). -->
+          <g id="layer-node-labels"></g>
+          <g id="layer-building-labels"></g>
+        </g>
       </g>
     </svg>
 
@@ -97,16 +105,16 @@
 
     <div class="panel">
       <h2>Display mode</h2>
-      <p class="hint">Map shows the GIS layers and PR/SR/OR regions. Network simplifies to nodes (sized/colored by PR) and edges only.</p>
+      <p class="hint">Map shows the data layers and PR/SR/OR regions. Network simplifies to nodes (PR) and directed links (SR or OR).</p>
       <div class="pill-row" data-group="view-mode">
-        <button class="pill view-pill" data-view="network" style="--pill-color:#333">Network graph</button>
+        <button class="pill view-pill" data-view="network" style="--pill-color:#333">Network</button>
         <button class="pill view-pill active" data-view="map" style="--pill-color:#333">Map</button>
       </div>
     </div>
 
     <div class="panel">
       <h2>Network selection</h2>
-      <p class="hint">Which directed network is drawn on the map, and which one the mitigation simulation below runs on &mdash; kept in sync so the two can't disagree.</p>
+      <p class="hint">Which directed network is drawn on the map, and which one the mitigation simulation below runs on.</p>
       <div class="pill-row" data-group="active-network">
         <button class="pill network-pill" data-network="SR" style="--pill-color:#d1495b">SR (Shared)</button>
         <button class="pill network-pill" data-network="OR" style="--pill-color:#2b6cb0">OR (Owed)</button>
@@ -114,8 +122,8 @@
     </div>
 
     <div class="panel">
-      <h2>Map coloring</h2>
-      <p class="hint">Colors the actual PR/SR/OR regions (Map mode only). Toggle any combination on at once.</p>
+      <h2>Spatial Responsibility</h2>
+      <p class="hint">Colors the actual PR/SR/OR regions (Map mode only). Toggle any combination.</p>
       <div class="row-label">Metric</div>
       <div class="pill-row" data-group="choropleth-mode">
         <button class="pill mode-pill active" data-mode="resp" style="--pill-color:#333">Responsibility [ft&sup3;/min]</button>
@@ -128,16 +136,22 @@
     </div>
 
     <div class="panel">
-      <h2>Background layers</h2>
+      <h2>Data and Formatting</h2>
       <label class="toggle"><input type="checkbox" id="toggle-parcels" checked> Parcels</label>
       <label class="toggle"><input type="checkbox" id="toggle-buildings" checked> Building footprints</label>
       <label class="toggle"><input type="checkbox" id="toggle-ds" checked> Defensible space buffers</label>
-      <label class="toggle"><input type="checkbox" id="toggle-labels" checked> House numbers</label>
+      <label class="toggle"><input type="checkbox" id="toggle-labels" checked> Show numbers</label>
+      <div class="row-label">Number style (Map view)</div>
+      <div class="pill-row" data-group="label-mode">
+        <button class="pill label-mode-pill active" data-label-mode="building" style="--pill-color:#333">Building numbers</button>
+        <button class="pill label-mode-pill" data-label-mode="node" style="--pill-color:#333">House numbers</button>
+      </div>
+      <p class="hint">Building numbers are per structure (0&ndash;69); house numbers are per property (0&ndash;64) Network view always uses house numbers.</p>
     </div>
 
     <div class="panel">
       <h2>Mitigation simulation</h2>
-      <p class="hint">Simulating the <b><span id="sim-network-label">SR</span></b> network (set via "Network selection" above). Removes links under three strategies and tracks remaining total responsibility.</p>
+      <p class="hint">Simulating the <b><span id="sim-network-label">SR</span></b> network (set via "Network selection" above). Link removal via three strategies and tracks remaining total responsibility.</p>
       <div class="row-label">Strategy</div>
       <div class="pill-row" data-group="sim-strategy">
         <button class="pill sim-pill" data-strategy="random" style="--pill-color:#555">Random</button>
