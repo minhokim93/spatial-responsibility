@@ -19,7 +19,7 @@ As wildfire risk escalates in the wildland urban interface/intermix (WUI), creat
 
 ![Responsibility concept](figures/concept.png)
 
-## 📊 Results
+## 📊 Highlighted Results
 
 All figures below are generated from the demonstration study site (`data/`) in `notebooks/main.ipynb`. Node color encodes Personal Responsibility (PR), and link color and direction represents Shared (SR) or Owed (OR) Responsibility.
 
