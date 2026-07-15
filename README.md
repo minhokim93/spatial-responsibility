@@ -15,7 +15,7 @@ As wildfire risk escalates in the wildland urban interface/intermix (WUI), creat
 ```
 src/
   utils.py        Helper functions
-  compute_sr.py   Compute PR/SR/OR/TR computation
+  compute_sr.py   Compute PR/SR/OR/TR
   geometry.py     Calculating geometry of whole neighborhood
   network.py      Building networks (NetworkX graphs) for SR and OR networks
   plot.py         Visualization functions of main figures
