@@ -5,11 +5,9 @@ Code accompanying:
 > Kim, M., Raine, H., Radke, J., & González, M. C. *A Network Approach to
 > Mapping Responsibility in Wildfire Risk Mitigation.*
 
-### 🔴 [Live interactive demo](https://minhokim93.github.io/spatial-responsibility/)
+### 🔴 [Interactive Viewer](https://minhokim93.github.io/spatial-responsibility/)
 
-Explore the study neighborhood's PR/SR/OR responsibility maps and networks, click any
-house for its stats and connections, and run the random/localized/targeted mitigation
-simulation directly in your browser &mdash; no install required.
+Explore the spatial responsibility maps and networks through this interactive viewer!
 
 ## Background
 
@@ -21,7 +19,7 @@ As wildfire risk escalates in the wildland urban interface/intermix (WUI), creat
 ```
 src/
   utils.py        Helper functions
-  compute_sr.py   Compute PR/SR/OR/TR
+  compute_sr.py   Compute PR/SR/OR
   geometry.py     Calculating geometry of whole neighborhood
   network.py      Building networks (NetworkX graphs) for SR and OR networks
   plot.py         Visualization functions of main figures
@@ -35,13 +33,10 @@ data/
   Outputs/ROS_nomit.tif
 
 visualization/
-  Source for the interactive viewer (index.html, styles.css, app.js) and
-  export_data.py, which regenerates data.json/data.js from src/ + data/.
+  Source code for interactive viewer
 
 docs/
-  A static copy of visualization/'s output, served by GitHub Pages at the
-  live demo link above. Re-copy after regenerating data.js or editing the
-  viewer -- docs/ is not auto-synced from visualization/.
+  Static viz output via Github pages 
 ```
 
 ## Setup
@@ -50,9 +45,8 @@ docs/
 pip install -r requirements.txt
 ```
 
-The repo contains a study area (demonstration neighborhood) `data/` for `notebooks/main.ipynb`. 
-To use different study area datasets, replace `data_path` in the notebook with your own
-`bldgs.shp`/`parcels.shp` (and your own risk raster for `risk_path`).
+The repo contains the study area (demonstration neighborhood) `data/` for `notebooks/main.ipynb`. 
+To use different study area datasets, replace `data_path` in the notebook with your own `bldgs.shp`/`parcels.shp` (and your own risk raster for `risk_path`).
 
 ## Citation
 
